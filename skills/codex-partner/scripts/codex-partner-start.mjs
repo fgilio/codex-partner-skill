@@ -3,19 +3,16 @@
 
 import {
   PartnerError,
-  TURN_FLAGS,
   assertPartnerName,
-  findSession,
-  isPartner,
-  loadSessions,
+  findPartner,
+  loadPartners,
   main,
-  parseArguments,
+  parseTurnArguments,
   printJson,
   readPrompt,
   repositoryRoot,
   runCodexTurn,
-  turnOptions,
-  updateSessions,
+  updatePartners,
 } from "./lib.mjs";
 
 const USAGE = `Usage: codex-partner-start.mjs <name> [options] <prompt | ->
@@ -24,8 +21,8 @@ Starts a Codex session that remembers the conversation. Continue it with
 codex-partner-say.mjs <name>. Names are scoped to the current repository.
 
 Options:
-  --model <id>       Codex model (default: CODEX_PARTNER_MODEL, then the Codex config)
-  --effort <level>   Reasoning effort (default: CODEX_PARTNER_EFFORT, then the Codex config)
+  --model <id>       Codex model (default: the Codex config)
+  --effort <level>   Reasoning effort (default: the Codex config)
   --write            Let Codex edit files and run any command, with no sandbox
   --mcp              Keep the MCP servers from the Codex config switched on
 
@@ -33,10 +30,10 @@ Pass - as the prompt to read it from stdin.
 `;
 
 main(async () => {
-  const { flags, positionals } = parseArguments(process.argv.slice(2), {
-    usage: USAGE,
-    ...TURN_FLAGS,
-  });
+  const { positionals, options } = parseTurnArguments(
+    process.argv.slice(2),
+    USAGE,
+  );
   const [name, promptArgument, ...extra] = positionals;
 
   assertPartnerName(name, USAGE);
@@ -50,7 +47,7 @@ main(async () => {
   const directory = process.cwd();
   const repository = repositoryRoot();
 
-  if (findSession(loadSessions(), repository, name)) {
+  if (findPartner(loadPartners(), repository, name)) {
     throw new PartnerError(
       `A partner named "${name}" already exists in ${repository}. Continue it with codex-partner-say.mjs ${name}, or forget it first.`,
     );
@@ -58,29 +55,37 @@ main(async () => {
 
   const turn = await runCodexTurn({
     prompt: readPrompt(promptArgument, USAGE),
-    options: turnOptions(flags),
+    options,
     directory,
   });
 
   if (!turn.threadId) {
     throw new PartnerError(
-      "Codex replied without reporting a session id, so the partner cannot be continued.",
+      "Codex replied without reporting a thread id, so the partner cannot be continued.",
     );
   }
 
   const now = new Date().toISOString();
 
-  updateSessions((sessions) => [
-    ...sessions.filter((session) => !isPartner(session, repository, name)),
-    {
-      name,
-      repository,
-      directory,
-      thread_id: turn.threadId,
-      created_at: now,
-      last_used_at: now,
-    },
-  ]);
+  updatePartners((partners) => {
+    if (findPartner(partners, repository, name)) {
+      throw new PartnerError(
+        `A partner named "${name}" was saved in ${repository} while Codex answered. This reply is on Codex thread ${turn.threadId}. Continue the saved partner with codex-partner-say.mjs ${name}, or forget it first.`,
+      );
+    }
+
+    return [
+      ...partners,
+      {
+        name,
+        repository,
+        directory,
+        thread_id: turn.threadId,
+        created_at: now,
+        last_used_at: now,
+      },
+    ];
+  });
 
   printJson({ name, thread_id: turn.threadId, reply: turn.reply });
 });

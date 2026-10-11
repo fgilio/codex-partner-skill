@@ -3,13 +3,11 @@
 
 import {
   PartnerError,
-  TURN_FLAGS,
   main,
-  parseArguments,
+  parseTurnArguments,
   printJson,
   readPrompt,
   runCodexTurn,
-  turnOptions,
 } from "./lib.mjs";
 
 const USAGE = `Usage: codex-partner-ask.mjs [options] <prompt | ->
@@ -17,8 +15,8 @@ const USAGE = `Usage: codex-partner-ask.mjs [options] <prompt | ->
 Asks Codex one question. Codex keeps no session, so a follow-up needs a partner.
 
 Options:
-  --model <id>       Codex model (default: CODEX_PARTNER_MODEL, then the Codex config)
-  --effort <level>   Reasoning effort (default: CODEX_PARTNER_EFFORT, then low)
+  --model <id>       Codex model (default: the Codex config)
+  --effort <level>   Reasoning effort (default: low)
   --write            Let Codex edit files and run any command, with no sandbox
   --mcp              Keep the MCP servers from the Codex config switched on
 
@@ -26,10 +24,11 @@ Pass - as the prompt to read it from stdin.
 `;
 
 main(async () => {
-  const { flags, positionals } = parseArguments(process.argv.slice(2), {
-    usage: USAGE,
-    ...TURN_FLAGS,
-  });
+  const { positionals, options } = parseTurnArguments(
+    process.argv.slice(2),
+    USAGE,
+    { defaultEffort: "low" },
+  );
 
   if (positionals.length > 1) {
     throw new PartnerError(
@@ -40,7 +39,7 @@ main(async () => {
   const turn = await runCodexTurn({
     prompt: readPrompt(positionals[0], USAGE),
     isEphemeral: true,
-    options: turnOptions(flags, { defaultEffort: "low" }),
+    options,
     directory: process.cwd(),
   });
 

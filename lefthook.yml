@@ -7,6 +7,6 @@
 pre-commit:
   commands:
     format:
-      glob: "*.{md,mdx,json,yml,yaml,mjs,js}"
+      glob: "*.{md,mdx,json,jsonc,yml,yaml,mjs,js}"
       run: npx --yes prettier@3 --write {staged_files}
       stage_fixed: true

@@ -6,14 +6,16 @@
  */
 
 const ENCRYPTION = { name: "AES-GCM", length: 256 };
+const BUNDLE_KEY_FORMAT =
+  "BUNDLE_KEY must be 32 random bytes encoded as base64.";
 
 export function generateBundleKey() {
   return bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
 }
 
-export async function sealBundle(bundle, bundleKey) {
+export async function sealBundle(login, bundleKey) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = new TextEncoder().encode(JSON.stringify(bundle));
+  const plaintext = new TextEncoder().encode(JSON.stringify(login));
   const ciphertext = await crypto.subtle.encrypt(
     { ...ENCRYPTION, iv },
     await importBundleKey(bundleKey),
@@ -36,19 +38,28 @@ export async function openBundle(sealed, bundleKey) {
     );
   }
 
-  const plaintext = await crypto.subtle.decrypt(
-    { ...ENCRYPTION, iv: base64ToBytes(iv) },
-    await importBundleKey(bundleKey),
-    base64ToBytes(data),
-  );
+  const key = await importBundleKey(bundleKey);
+  let plaintext;
+
+  try {
+    plaintext = await crypto.subtle.decrypt(
+      { ...ENCRYPTION, iv: base64ToBytes(iv) },
+      key,
+      base64ToBytes(data),
+    );
+  } catch {
+    throw new Error(
+      "The sealed login does not decrypt with the current BUNDLE_KEY.",
+    );
+  }
 
   return JSON.parse(new TextDecoder().decode(plaintext));
 }
 
 /**
- * Reads the `exp` claim of a JWT without verifying it, in milliseconds.
+ * Reads the `exp` claim of a JWT without verifying it.
  */
-export function accessTokenExpiry(accessToken) {
+export function accessTokenExpiryMs(accessToken) {
   const payload =
     typeof accessToken === "string" ? accessToken.split(".")[1] : undefined;
 
@@ -70,10 +81,16 @@ export function accessTokenExpiry(accessToken) {
 }
 
 async function importBundleKey(bundleKey) {
-  const rawKey = bundleKey ? base64ToBytes(bundleKey) : new Uint8Array();
+  let rawKey;
+
+  try {
+    rawKey = base64ToBytes(bundleKey ?? "");
+  } catch {
+    throw new Error(BUNDLE_KEY_FORMAT);
+  }
 
   if (rawKey.length !== 32) {
-    throw new Error("BUNDLE_KEY must be 32 random bytes encoded as base64.");
+    throw new Error(BUNDLE_KEY_FORMAT);
   }
 
   return crypto.subtle.importKey("raw", rawKey, ENCRYPTION, false, [
@@ -86,11 +103,7 @@ function bytesToBase64(bytes) {
   return btoa(Array.from(bytes, (byte) => String.fromCharCode(byte)).join(""));
 }
 
+// atob accepts base64 with or without its trailing padding.
 function base64ToBytes(base64) {
-  const padded = base64.padEnd(
-    base64.length + ((4 - (base64.length % 4)) % 4),
-    "=",
-  );
-
-  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+  return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
 }

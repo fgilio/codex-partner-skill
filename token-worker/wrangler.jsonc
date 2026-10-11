@@ -10,8 +10,7 @@
       "id": "e375ecfde5ba4c16a9583a4b04eb2531",
     },
   ],
-  // Every 6 hours. The worker refreshes once the access token has
-  // less than 36 hours left, so one failed run never strands clients.
+  // src/index.mjs sizes its refresh window to this 6-hour interval.
   "triggers": {
     "crons": ["17 */6 * * *"],
   },

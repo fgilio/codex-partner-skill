@@ -11,12 +11,15 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { once } from "node:events";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { makeJwt } from "./fixtures/jwt.mjs";
+
+const HOUR_MS = 60 * 60 * 1000;
 
 const repositoryDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const scriptsDirectory = join(
@@ -56,7 +59,7 @@ function createSandbox() {
       PATH: `${binDirectory}:${process.env.PATH}`,
       HOME: root,
       CODEX_HOME: codexHome,
-      CODEX_PARTNER_HOME: join(root, "state"),
+      XDG_STATE_HOME: join(root, "state"),
       FAKE_CODEX_LOG: log,
     },
   };
@@ -109,7 +112,12 @@ function codexCalls() {
 }
 
 function lockPath(threadId) {
-  return join(sandbox.env.CODEX_PARTNER_HOME, "locks", `${threadId}.lock`);
+  return join(
+    sandbox.env.XDG_STATE_HOME,
+    "codex-partner",
+    "locks",
+    `${threadId}.lock`,
+  );
 }
 
 function workerLogin(expiresInMs) {
@@ -154,22 +162,24 @@ describe("codex-partner-ask", () => {
     );
   });
 
-  test("passes --model and --effort, and falls back to the environment defaults", async () => {
+  test("passes --model and --effort, and leaves a partner's defaults to the Codex config", async () => {
     await runScript("codex-partner-ask.mjs", [
       "--model",
       "model-a",
       "--effort=high",
       "Hi",
     ]);
-    await runScript("codex-partner-ask.mjs", ["Hi"], {
-      env: { CODEX_PARTNER_MODEL: "model-b", CODEX_PARTNER_EFFORT: "medium" },
-    });
+    await runScript("codex-partner-start.mjs", ["review", "Hi"]);
     const [flagged, defaulted] = codexCalls();
 
     assert.equal(flagged.args[flagged.args.indexOf("--model") + 1], "model-a");
     assert.ok(flagged.args.includes('model_reasoning_effort="high"'));
-    assert.ok(defaulted.args.includes("model-b"));
-    assert.ok(defaulted.args.includes('model_reasoning_effort="medium"'));
+    assert.ok(!defaulted.args.includes("--model"));
+    assert.ok(
+      !defaulted.args.some((argument) =>
+        argument.startsWith("model_reasoning_effort"),
+      ),
+    );
   });
 
   test("reads the prompt from stdin when it is -", async () => {
@@ -212,27 +222,12 @@ describe("codex-partner-ask", () => {
     );
   });
 
-  test("--write and CODEX_PARTNER_SANDBOX=bypass run Codex without a sandbox", async () => {
+  test("--write runs Codex without a sandbox", async () => {
     await runScript("codex-partner-ask.mjs", ["--write", "Hi"]);
-    await runScript("codex-partner-ask.mjs", ["Hi"], {
-      env: { CODEX_PARTNER_SANDBOX: "bypass" },
-    });
+    const [call] = codexCalls();
 
-    for (const call of codexCalls()) {
-      assert.ok(
-        call.args.includes("--dangerously-bypass-approvals-and-sandbox"),
-      );
-      assert.ok(!call.args.includes('sandbox_mode="read-only"'));
-    }
-  });
-
-  test("names the accepted values for an unknown CODEX_PARTNER_SANDBOX", async () => {
-    const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
-      env: { CODEX_PARTNER_SANDBOX: "loose" },
-    });
-
-    assert.equal(result.status, 1);
-    assert.match(result.error, /read-only or bypass/);
+    assert.ok(call.args.includes("--dangerously-bypass-approvals-and-sandbox"));
+    assert.ok(!call.args.includes('sandbox_mode="read-only"'));
   });
 
   test("surfaces the Codex error message when a turn fails", async () => {
@@ -243,7 +238,7 @@ describe("codex-partner-ask", () => {
     assert.equal(result.status, 1);
     assert.match(
       result.error,
-      /exited with code 1 without a reply: model overloaded/,
+      /exited with code 1 without a reply: model overloaded\.$/,
     );
   });
 
@@ -263,9 +258,19 @@ describe("codex-partner-ask", () => {
     assert.match(result.error, /Unknown option --loud/);
     assert.match(result.error, /Usage: codex-partner-ask/);
   });
+
+  test("says a boolean option takes no value", async () => {
+    const result = await runScript("codex-partner-ask.mjs", [
+      "--write=true",
+      "Hi",
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.error, /The --write option takes no value/);
+  });
 });
 
-describe("partner sessions", () => {
+describe("partners", () => {
   test("start saves the partner and say resumes the same Codex thread", async () => {
     const started = await runScript(
       "codex-partner-start.mjs",
@@ -362,7 +367,7 @@ describe("partner sessions", () => {
     assert.equal(codexCalls().length, 1);
   });
 
-  test("start fails when Codex reports no session id", async () => {
+  test("start fails when Codex reports no thread id", async () => {
     const result = await runScript(
       "codex-partner-start.mjs",
       ["review", "Hi"],
@@ -371,8 +376,34 @@ describe("partner sessions", () => {
     const list = await runScript("codex-partner-list.mjs", []);
 
     assert.equal(result.status, 1);
-    assert.match(result.error, /without reporting a session id/);
+    assert.match(result.error, /without reporting a thread id/);
     assert.deepEqual(list.json, []);
+  });
+
+  test("start refuses to replace a same-name partner saved while Codex answered", async () => {
+    const [slow, fast] = await Promise.all([
+      runScript("codex-partner-start.mjs", ["review", "Slow"], {
+        env: {
+          FAKE_CODEX_THREAD_ID: "thread-slow",
+          FAKE_CODEX_DELAY_MS: "800",
+        },
+      }),
+      runScript("codex-partner-start.mjs", ["review", "Fast"], {
+        env: { FAKE_CODEX_THREAD_ID: "thread-fast" },
+      }),
+    ]);
+    const list = await runScript("codex-partner-list.mjs", []);
+
+    assert.equal(fast.status, 0, fast.stderr);
+    assert.equal(slow.status, 1);
+    assert.match(
+      slow.error,
+      /was saved in .* while Codex answered\. This reply is on Codex thread thread-slow/,
+    );
+    assert.deepEqual(
+      list.json.map((partner) => partner.thread_id),
+      ["thread-fast"],
+    );
   });
 
   test("say names the command that starts an unknown partner", async () => {
@@ -431,8 +462,9 @@ describe("partner sessions", () => {
     ]);
 
     assert.deepEqual(forgotten.json, {
-      forgotten: "review",
+      name: "review",
       thread_id: "thread-9",
+      forgotten: true,
     });
     assert.equal(restarted.status, 0, restarted.stderr);
   });
@@ -466,16 +498,16 @@ describe("cloud auth", () => {
       response.writeHead(status, { "Content-Type": "application/json" });
       response.end(JSON.stringify(body));
     });
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await once(server.listen(0, "127.0.0.1"), "listening");
     tokenUrl = `http://127.0.0.1:${server.address().port}/auth.json`;
   });
 
-  afterEach(() => server.close());
+  afterEach(() => once(server.close(), "close"));
 
   const authPath = () => join(sandbox.codexHome, "auth.json");
 
   test("writes the worker login with mode 600 before calling Codex", async () => {
-    respond = () => [200, workerLogin(10 * 24 * 60 * 60 * 1000)];
+    respond = () => [200, workerLogin(10 * 24 * HOUR_MS)];
 
     const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
       env: { CODEX_TOKEN_URL: tokenUrl, CODEX_TOKEN_BEARER: "serve-secret" },
@@ -492,7 +524,7 @@ describe("cloud auth", () => {
   });
 
   test("reuses a stored worker login until it is about to expire", async () => {
-    respond = () => [200, workerLogin(10 * 24 * 60 * 60 * 1000)];
+    respond = () => [200, workerLogin(10 * 24 * HOUR_MS)];
 
     await runScript("codex-partner-auth.mjs", [], {
       env: { CODEX_TOKEN_URL: tokenUrl },
@@ -504,12 +536,13 @@ describe("cloud auth", () => {
     assert.equal(requests.length, 1);
     assert.equal(reused.json.source, "token-worker");
     assert.equal(reused.json.fetched, false);
+    assert.match(reused.json.access_expires_at, /^\d{4}-\d\d-\d\dT/);
   });
 
   test("fetches a new login when the stored one expires within the hour", async () => {
     mkdirSync(sandbox.codexHome, { recursive: true });
-    writeFileSync(authPath(), JSON.stringify(workerLogin(30 * 60 * 1000)));
-    respond = () => [200, workerLogin(10 * 24 * 60 * 60 * 1000)];
+    writeFileSync(authPath(), JSON.stringify(workerLogin(HOUR_MS / 2)));
+    respond = () => [200, workerLogin(10 * 24 * HOUR_MS)];
 
     const result = await runScript("codex-partner-auth.mjs", [], {
       env: { CODEX_TOKEN_URL: tokenUrl },
@@ -519,8 +552,8 @@ describe("cloud auth", () => {
     assert.equal(requests.length, 1);
   });
 
-  test("never replaces a codex login that carries a refresh token", async () => {
-    const ownLogin = workerLogin(60 * 1000);
+  test("never replaces a Codex login that carries a refresh token", async () => {
+    const ownLogin = workerLogin(HOUR_MS);
     ownLogin.tokens.refresh_token = "real-refresh-token";
     mkdirSync(sandbox.codexHome, { recursive: true });
     writeFileSync(authPath(), JSON.stringify(ownLogin));
@@ -584,9 +617,16 @@ describe("cloud auth", () => {
     assert.match(result.error, /codex-partner: .*No Codex login is stored/);
   });
 
-  test("reports the codex login source when CODEX_TOKEN_URL is unset", async () => {
+  test("reports the codex-login source when CODEX_TOKEN_URL is unset", async () => {
     const result = await runScript("codex-partner-auth.mjs", []);
 
     assert.deepEqual(result.json, { source: "codex-login" });
+  });
+
+  test("auth rejects positional arguments", async () => {
+    const result = await runScript("codex-partner-auth.mjs", ["now"]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.error, /takes no arguments/);
   });
 });

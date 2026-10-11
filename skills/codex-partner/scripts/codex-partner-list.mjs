@@ -3,7 +3,7 @@
 
 import {
   PartnerError,
-  loadSessions,
+  loadPartners,
   main,
   parseArguments,
   printJson,
@@ -31,9 +31,9 @@ main(async () => {
   }
 
   const repository = repositoryRoot();
-  const sessions = loadSessions()
-    .filter((session) => flags.all || session.repository === repository)
+  const partners = loadPartners()
+    .filter((partner) => flags.all || partner.repository === repository)
     .sort((a, b) => b.last_used_at.localeCompare(a.last_used_at));
 
-  printJson(sessions);
+  printJson(partners);
 });

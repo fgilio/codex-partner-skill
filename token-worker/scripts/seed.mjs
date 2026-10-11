@@ -27,10 +27,11 @@ import {
   printJson,
 } from "../../skills/codex-partner/scripts/lib.mjs";
 import {
-  accessTokenExpiry,
+  accessTokenExpiryMs,
   generateBundleKey,
   sealBundle,
 } from "../src/bundle.mjs";
+import { BUNDLE_KV_KEY, STATUS_KV_KEY } from "../src/index.mjs";
 
 const USAGE = `Usage: node token-worker/scripts/seed.mjs [--auth <auth.json>]
 
@@ -43,6 +44,12 @@ Requires wrangler (logged in) and CLOUDFLARE_ACCOUNT_ID for the worker's account
 
 const workerDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+function missingCommand(command) {
+  return new PartnerError(
+    `Unable to find ${command} on PATH. Install it, then run this script again.`,
+  );
+}
+
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: workerDirectory,
@@ -51,14 +58,18 @@ function run(command, args, options = {}) {
   });
 
   if (result.error?.code === "ENOENT") {
-    throw new PartnerError(
-      `Unable to find ${command} on PATH. Install it, then run this script again.`,
-    );
+    throw missingCommand(command);
   }
 
   if (result.status !== 0) {
+    const detail =
+      result.stderr ||
+      result.stdout ||
+      result.error?.message ||
+      `exit ${result.status}`;
+
     throw new PartnerError(
-      `${command} ${args.slice(0, 3).join(" ")} failed: ${(result.stderr || result.stdout || "").trim()}`,
+      `${command} ${args.slice(0, 3).join(" ")} failed: ${detail.trim()}`,
     );
   }
 
@@ -72,15 +83,25 @@ function readLogin(path) {
     );
   }
 
-  const login = JSON.parse(readFileSync(path, "utf8"));
+  let login;
 
-  if (
-    login.auth_mode !== "chatgpt" ||
-    !login.tokens?.refresh_token ||
-    !accessTokenExpiry(login.tokens.access_token)
-  ) {
+  try {
+    login = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new PartnerError(
+      `Unable to parse ${path} as JSON. Pass the auth.json that \`codex login\` wrote.`,
+    );
+  }
+
+  if (login?.auth_mode !== "chatgpt" || !login.tokens?.refresh_token) {
     throw new PartnerError(
       `${path} is not a ChatGPT login with a refresh token. Sign in with ChatGPT, not an API key.`,
+    );
+  }
+
+  if (!accessTokenExpiryMs(login.tokens.access_token)) {
+    throw new PartnerError(
+      `${path} holds an access token with no readable expiry. Sign in again with \`codex login\`.`,
     );
   }
 
@@ -104,6 +125,10 @@ function signInToDedicatedHome(dedicatedHome) {
     },
   );
 
+  if (result.error?.code === "ENOENT") {
+    throw missingCommand("codex");
+  }
+
   if (result.status !== 0) {
     throw new PartnerError(
       "`codex login` did not finish. Run this script again and complete the sign-in in the browser.",
@@ -121,7 +146,7 @@ main(async () => {
 
   if (positionals.length > 0) {
     throw new PartnerError(
-      `Unknown arguments: ${positionals.join(" ")}\n\n${USAGE}`,
+      `seed.mjs takes no positional arguments.\n\n${USAGE}`,
     );
   }
 
@@ -137,6 +162,7 @@ main(async () => {
     const loginPath = flags.auth
       ? resolve(flags.auth)
       : signInToDedicatedHome(join(scratch, "codex-home"));
+    const login = readLogin(loginPath);
     const sharedLoginPath = join(codexHome(), "auth.json");
 
     // A login another machine refreshes would spend the worker's
@@ -150,7 +176,6 @@ main(async () => {
       );
     }
 
-    const login = readLogin(loginPath);
     const bundleKey = generateBundleKey();
     const sealedPath = join(scratch, "bundle.json");
 
@@ -162,7 +187,7 @@ main(async () => {
       "kv",
       "key",
       "put",
-      "bundle",
+      BUNDLE_KV_KEY,
       "--binding",
       "CODEX_AUTH",
       "--remote",
@@ -174,7 +199,7 @@ main(async () => {
       "kv",
       "key",
       "put",
-      "status",
+      STATUS_KV_KEY,
       JSON.stringify({ seeded_at: new Date().toISOString(), last_error: null }),
       "--binding",
       "CODEX_AUTH",
@@ -185,7 +210,7 @@ main(async () => {
       seeded: true,
       account_id: login.tokens.account_id,
       access_expires_at: new Date(
-        accessTokenExpiry(login.tokens.access_token),
+        accessTokenExpiryMs(login.tokens.access_token),
       ).toISOString(),
     });
   } finally {

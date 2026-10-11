@@ -16,9 +16,15 @@ main(async () => {
 
   const { CODEX_TOKEN_URL: tokenUrl, CODEX_TOKEN_BEARER: bearer } = process.env;
 
-  if (!tokenUrl || !bearer) {
+  if (!tokenUrl) {
     throw new PartnerError(
-      `Set CODEX_TOKEN_URL and CODEX_TOKEN_BEARER.\n\n${USAGE}`,
+      `Set CODEX_TOKEN_URL to the worker's /auth.json URL.\n\n${USAGE}`,
+    );
+  }
+
+  if (!bearer) {
+    throw new PartnerError(
+      `Set CODEX_TOKEN_BEARER to the worker's serve token.\n\n${USAGE}`,
     );
   }
 

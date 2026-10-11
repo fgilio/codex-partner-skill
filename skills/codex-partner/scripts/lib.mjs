@@ -2,7 +2,7 @@
  * Shared runtime for the codex-partner scripts.
  *
  * Every Codex call goes through runCodexTurn(), so stdin, sandbox,
- * MCP, and cloud-auth handling stay in one place.
+ * MCP, and login handling stay in one place.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -21,13 +21,12 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 const PARTNER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const SANDBOX_MODES = ["read-only", "bypass"];
 const CODEX_MISSING =
   "Unable to find the codex executable on PATH. Install it with `npm install -g @openai/codex`, then try again.";
 
 // Codex refreshes a token 5 minutes before it expires, and a worker-issued
-// login has no refresh token, so fetch a new one well before that point.
-const REFETCH_BELOW_MS = 60 * 60 * 1000;
+// login cannot refresh, so fetch a new one well before that point.
+const FETCH_BELOW_MS = 60 * 60 * 1000;
 
 export class PartnerError extends Error {}
 
@@ -82,7 +81,13 @@ export function parseArguments(
 
     const [name, inlineValue] = splitFlag(argument.slice(2));
 
-    if (booleanFlags.includes(name) && inlineValue === undefined) {
+    if (booleanFlags.includes(name) && inlineValue !== undefined) {
+      throw new PartnerError(
+        `The --${name} option takes no value.\n\n${usage}`,
+      );
+    }
+
+    if (booleanFlags.includes(name)) {
       flags[name] = true;
       continue;
     }
@@ -109,6 +114,24 @@ function splitFlag(flag) {
   return boundary === -1
     ? [flag, undefined]
     : [flag.slice(0, boundary), flag.slice(boundary + 1)];
+}
+
+export function parseTurnArguments(argv, usage, { defaultEffort } = {}) {
+  const { flags, positionals } = parseArguments(argv, {
+    usage,
+    valueFlags: ["model", "effort"],
+    booleanFlags: ["write", "mcp"],
+  });
+
+  return {
+    positionals,
+    options: {
+      model: flags.model,
+      effort: flags.effort ?? defaultEffort,
+      canWrite: flags.write === true,
+      keepsMcpServers: flags.mcp === true,
+    },
+  };
 }
 
 export function readPrompt(value, usage) {
@@ -148,10 +171,6 @@ export function repositoryRoot() {
 }
 
 function partnerHome() {
-  if (process.env.CODEX_PARTNER_HOME) {
-    return process.env.CODEX_PARTNER_HOME;
-  }
-
   return join(
     process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"),
     "codex-partner",
@@ -162,45 +181,41 @@ export function codexHome() {
   return process.env.CODEX_HOME || join(homedir(), ".codex");
 }
 
-function sessionsPath() {
+function partnersPath() {
   return join(partnerHome(), "sessions.json");
 }
 
-export function loadSessions() {
-  const path = sessionsPath();
-  const sessions =
+export function loadPartners() {
+  const path = partnersPath();
+  const partners =
     readJsonIfPresent(
       path,
       "Move the file aside, then start the partner again.",
     ) ?? [];
 
-  if (!Array.isArray(sessions)) {
+  if (!Array.isArray(partners)) {
     throw new PartnerError(
       `${path} does not hold a list of partners. Move the file aside, then start the partner again.`,
     );
   }
 
-  return sessions;
+  return partners;
 }
 
 /**
- * Reloads, changes, and saves the sessions file in one short step,
- * so a partner saved by a concurrent call is not overwritten.
+ * Reloads the partner list just before each write, so only that
+ * short window can lose a change saved by a concurrent call.
  */
-export function updateSessions(change) {
-  const sessions = change(loadSessions());
-
-  writeJsonAtomically(sessionsPath(), sessions, 0o600);
-
-  return sessions;
+export function updatePartners(change) {
+  writeJsonAtomically(partnersPath(), change(loadPartners()), 0o600);
 }
 
-export function isPartner(session, repository, name) {
-  return session.repository === repository && session.name === name;
+export function isPartner(partner, repository, name) {
+  return partner.repository === repository && partner.name === name;
 }
 
-export function findSession(sessions, repository, name) {
-  return sessions.find((session) => isPartner(session, repository, name));
+export function findPartner(partners, repository, name) {
+  return partners.find((partner) => isPartner(partner, repository, name));
 }
 
 /**
@@ -258,25 +273,8 @@ function isProcessAlive(pid) {
   }
 }
 
-export const TURN_FLAGS = {
-  valueFlags: ["model", "effort"],
-  booleanFlags: ["write", "mcp"],
-};
-
-export function turnOptions(flags, { defaultEffort } = {}) {
-  return {
-    model: flags.model ?? process.env.CODEX_PARTNER_MODEL,
-    effort: flags.effort ?? process.env.CODEX_PARTNER_EFFORT ?? defaultEffort,
-    canWrite: flags.write === true,
-    keepsMcpServers: flags.mcp === true,
-  };
-}
-
 /**
  * Runs one Codex turn and returns its thread id and final message.
- *
- * The prompt travels on stdin, which keeps long prompts clear of
- * argv limits and stops Codex from waiting on an inherited stdin.
  */
 export async function runCodexTurn({
   prompt,
@@ -285,7 +283,7 @@ export async function runCodexTurn({
   options,
   directory,
 }) {
-  ensureCloudAuth();
+  ensureCodexLogin();
 
   const scratch = mkdtempSync(join(tmpdir(), "codex-partner-"));
   const replyPath = join(scratch, "reply.md");
@@ -295,13 +293,16 @@ export async function runCodexTurn({
     "--json",
     "--output-last-message",
     replyPath,
-    ...sandboxArguments(options.canWrite),
+    ...(options.canWrite
+      ? ["--dangerously-bypass-approvals-and-sandbox"]
+      : ["--config", 'sandbox_mode="read-only"']),
     ...(options.model ? ["--model", options.model] : []),
     ...(options.effort
       ? ["--config", `model_reasoning_effort="${options.effort}"`]
       : []),
     ...(options.keepsMcpServers ? [] : mcpServerOverrides()),
     ...(isEphemeral ? ["--ephemeral"] : []),
+    // "-" reads the prompt from stdin, clear of argv length limits.
     ...(threadId ? ["resume", threadId, "-"] : ["-"]),
   ];
 
@@ -376,6 +377,7 @@ function spawnCodex(codexArguments, prompt, directory) {
       });
     });
 
+    // Codex can exit before it reads the prompt. The close handler reports that.
     child.stdin.on("error", () => {});
     child.stdin.end(prompt);
   });
@@ -390,8 +392,11 @@ function parseJsonOrNull(text) {
 }
 
 function describeCodexFailure(run, threadId) {
-  const detail =
-    run.errorMessages.at(-1) ?? run.stderrLines.slice(-5).join("\n");
+  const detail = (
+    run.errorMessages.at(-1) ?? run.stderrLines.slice(-5).join("\n")
+  )
+    .trim()
+    .replace(/\.$/, "");
   const outcome = run.signal
     ? `stopped by ${run.signal}`
     : `exited with code ${run.exitCode}`;
@@ -399,23 +404,7 @@ function describeCodexFailure(run, threadId) {
     ? " If Codex no longer has this session, forget the partner and start a new one with a recap."
     : "";
 
-  return `Codex ${outcome} without a reply${detail ? `: ${detail}` : "."}${hint}`;
-}
-
-function sandboxArguments(canWrite) {
-  const mode = process.env.CODEX_PARTNER_SANDBOX ?? "read-only";
-
-  if (!SANDBOX_MODES.includes(mode)) {
-    throw new PartnerError(
-      `CODEX_PARTNER_SANDBOX is "${mode}". Set it to ${SANDBOX_MODES.join(" or ")}.`,
-    );
-  }
-
-  if (canWrite || mode === "bypass") {
-    return ["--dangerously-bypass-approvals-and-sandbox"];
-  }
-
-  return ["--config", 'sandbox_mode="read-only"'];
+  return `Codex ${outcome} without a reply${detail ? `: ${detail}` : ""}.${hint}`;
 }
 
 /**
@@ -450,52 +439,53 @@ function mcpServerOverrides() {
  * Keeps a worker-issued Codex login current when CODEX_TOKEN_URL is set.
  *
  * A login with a refresh token belongs to `codex login` and is
- * never replaced. The worker's logins carry an empty refresh token.
+ * never replaced.
  */
-export function ensureCloudAuth() {
+export function ensureCodexLogin() {
   const tokenUrl = process.env.CODEX_TOKEN_URL;
 
   if (!tokenUrl) {
     return { source: "codex-login" };
   }
 
-  const authPath = join(codexHome(), "auth.json");
-  const currentAuth = readJsonIfPresent(
-    authPath,
+  const loginPath = join(codexHome(), "auth.json");
+  const currentLogin = readJsonIfPresent(
+    loginPath,
     "Run `codex login`, or delete the file to use the token worker.",
   );
 
-  if (currentAuth && !isWorkerIssued(currentAuth)) {
+  if (currentLogin && !isWorkerIssued(currentLogin)) {
     return { source: "codex-login" };
   }
 
-  let expiry = accessTokenExpiry(currentAuth?.tokens.access_token);
-  const fetched = !expiry || expiry - Date.now() <= REFETCH_BELOW_MS;
+  const currentExpiry = accessTokenExpiryMs(currentLogin?.tokens.access_token);
+  const needsFetch =
+    !currentExpiry || currentExpiry - Date.now() <= FETCH_BELOW_MS;
+  const login = needsFetch ? fetchWorkerLogin(tokenUrl) : currentLogin;
 
-  if (fetched) {
-    const fetchedAuth = fetchWorkerAuth(tokenUrl);
-
-    writeJsonAtomically(authPath, fetchedAuth, 0o600);
-    expiry = accessTokenExpiry(fetchedAuth.tokens.access_token);
+  if (needsFetch) {
+    writeJsonAtomically(loginPath, login, 0o600);
   }
 
   return {
     source: "token-worker",
-    expires_at: new Date(expiry).toISOString(),
-    fetched,
+    access_expires_at: new Date(
+      accessTokenExpiryMs(login.tokens.access_token),
+    ).toISOString(),
+    fetched: needsFetch,
   };
 }
 
-function isWorkerIssued(auth) {
-  return auth.auth_mode === "chatgpt" && auth.tokens?.refresh_token === "";
+// The worker issues its logins with an empty refresh token.
+function isWorkerIssued(login) {
+  return login.auth_mode === "chatgpt" && login.tokens?.refresh_token === "";
 }
 
 /**
- * Fetches with curl, which honors the cloud VM's HTTPS proxy and CA
- * store. Headers go through stdin so a bearer token stays out of ps.
+ * Fetches with curl, which honors the cloud VM's HTTPS proxy and CA store.
  */
-function fetchWorkerAuth(tokenUrl) {
-  const host = safeHost(tokenUrl);
+function fetchWorkerLogin(tokenUrl) {
+  const host = hostOf(tokenUrl);
   const headers = ["Accept: application/json"];
 
   if (process.env.CODEX_TOKEN_BEARER) {
@@ -509,6 +499,7 @@ function fetchWorkerAuth(tokenUrl) {
       "--show-error",
       "--max-time",
       "20",
+      // Headers come from stdin, so the serve token stays out of ps.
       "--header",
       "@-",
       "--write-out",
@@ -542,13 +533,13 @@ function fetchWorkerAuth(tokenUrl) {
 
   if (status !== 200) {
     throw new PartnerError(
-      `The token worker at ${host} answered ${status}: ${body?.error ?? "no error message"}`,
+      `The token worker at ${host} answered ${status}: ${body?.error ?? "no error message."}`,
     );
   }
 
   if (
     !isWorkerIssued(body ?? {}) ||
-    !accessTokenExpiry(body.tokens.access_token)
+    !accessTokenExpiryMs(body.tokens.access_token)
   ) {
     throw new PartnerError(
       `The token worker at ${host} returned a response that is not a Codex login.`,
@@ -558,7 +549,7 @@ function fetchWorkerAuth(tokenUrl) {
   return body;
 }
 
-function safeHost(url) {
+function hostOf(url) {
   try {
     return new URL(url).host;
   } catch {
@@ -568,7 +559,7 @@ function safeHost(url) {
   }
 }
 
-function accessTokenExpiry(accessToken) {
+function accessTokenExpiryMs(accessToken) {
   const payload =
     typeof accessToken === "string" ? accessToken.split(".")[1] : undefined;
 

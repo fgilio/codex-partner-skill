@@ -1,12 +1,12 @@
 /**
  * Serves short-lived Codex access tokens from one ChatGPT login.
  *
- * The scheduled handler is the only code that refreshes the login,
- * because a refresh rotates the refresh token and any second
- * refresher would spend it. Clients get the access token alone.
+ * The scheduled handler is the only code that refreshes the login:
+ * a refresh rotates the refresh token, so a second refresher
+ * would spend it. Clients receive the access token alone.
  */
 
-import { accessTokenExpiry, openBundle, sealBundle } from "./bundle.mjs";
+import { accessTokenExpiryMs, openBundle, sealBundle } from "./bundle.mjs";
 
 const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -15,14 +15,17 @@ const HOUR_MS = 60 * 60 * 1000;
 
 // The cron runs every 6 hours, so a refresh that keeps failing still
 // leaves more than a day of valid access before clients notice.
-const DEFAULT_REFRESH_BELOW_HOURS = 36;
+const REFRESH_BELOW_MS = 36 * HOUR_MS;
 
 // Clients fetch a new token once theirs has less than an hour left,
 // so a token closer to expiry than that is never served.
-const SERVE_BELOW_MS = HOUR_MS;
+const SERVE_ABOVE_MS = HOUR_MS;
 
-const BUNDLE_KEY = "bundle";
-const STATUS_KEY = "status";
+const KV_PUT_ATTEMPTS = 3;
+
+export const BUNDLE_KV_KEY = "bundle";
+export const STATUS_KV_KEY = "status";
+
 const SEED_HINT =
   "Run `node token-worker/scripts/seed.mjs` to store a fresh login.";
 
@@ -54,13 +57,19 @@ export async function handleRequest(request, env) {
   }
 
   if (!(await hasServeToken(request, env.SERVE_TOKEN))) {
-    return json({ error: "Missing or invalid bearer token." }, 401);
+    return json(
+      {
+        error:
+          "Missing or invalid serve token. Send it as 'Authorization: Bearer <serve token>'.",
+      },
+      401,
+    );
   }
 
-  let bundle;
+  let login;
 
   try {
-    bundle = await loadBundle(env);
+    login = await loadLogin(env);
   } catch (error) {
     return json(
       {
@@ -70,21 +79,28 @@ export async function handleRequest(request, env) {
     );
   }
 
-  if (!bundle) {
+  if (!login) {
     return json({ error: `No Codex login is stored. ${SEED_HINT}` }, 503);
   }
 
-  const expiresAt = accessTokenExpiry(bundle.tokens.access_token);
+  const expiresAt = accessTokenExpiryMs(login.tokens.access_token);
 
   if (pathname === "/status") {
     return json({
       access_expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-      last_refresh: bundle.last_refresh ?? null,
+      last_refresh: login.last_refresh ?? null,
       ...(await loadStatus(env)),
     });
   }
 
-  if (!expiresAt || expiresAt - Date.now() < SERVE_BELOW_MS) {
+  if (!expiresAt) {
+    return json(
+      { error: `The stored access token has no readable expiry. ${SEED_HINT}` },
+      503,
+    );
+  }
+
+  if (expiresAt - Date.now() < SERVE_ABOVE_MS) {
     const { last_error: lastError } = await loadStatus(env);
     const cause = lastError ? ` The last refresh failed: ${lastError}` : "";
 
@@ -96,72 +112,66 @@ export async function handleRequest(request, env) {
     );
   }
 
-  return json(consumerLogin(bundle));
+  return json(clientLogin(login));
 }
 
 /**
- * Refreshes the stored login once its access token has less than
- * REFRESH_BELOW_HOURS left (36 by default). A failure leaves the
- * stored login intact.
+ * Refreshes the stored login once its access token has less
+ * than REFRESH_BELOW_MS left. A failure leaves the stored
+ * login intact.
  */
 export async function refreshIfExpiring(env, now = Date.now()) {
-  const bundle = await loadBundle(env);
+  const login = await loadLogin(env);
 
-  if (!bundle) {
+  if (!login) {
     return { refreshed: false, reason: "no login stored" };
   }
 
-  const refreshBelowHours = Number(
-    env.REFRESH_BELOW_HOURS ?? DEFAULT_REFRESH_BELOW_HOURS,
-  );
-
-  if (!(refreshBelowHours > 0)) {
-    throw new Error(
-      `REFRESH_BELOW_HOURS is "${env.REFRESH_BELOW_HOURS}". Set it to a number of hours above 0.`,
-    );
-  }
-
-  if (
-    accessTokenExpiry(bundle.tokens.access_token) - now >
-    refreshBelowHours * HOUR_MS
-  ) {
+  if (accessTokenExpiryMs(login.tokens.access_token) - now > REFRESH_BELOW_MS) {
     return { refreshed: false, reason: "access token still fresh" };
   }
 
   const attemptedAt = new Date(now).toISOString();
-  let refreshedBundle;
+  let refreshedLogin;
 
   try {
-    refreshedBundle = withRefreshedTokens(
-      bundle,
-      await requestRefresh(bundle.tokens.refresh_token),
+    refreshedLogin = withRefreshedTokens(
+      login,
+      await requestRefresh(login.tokens.refresh_token),
       attemptedAt,
     );
   } catch (error) {
-    await env.CODEX_AUTH.put(
-      STATUS_KEY,
-      JSON.stringify({
-        last_attempt_at: attemptedAt,
-        last_error: error.message,
-      }),
-    );
+    await updateStatus(env, {
+      last_attempt_at: attemptedAt,
+      last_error: error.message,
+    });
     console.error(`Codex token refresh failed: ${error.message}`);
 
     return { refreshed: false, reason: error.message };
   }
 
-  // The old refresh token is spent at this point, so the new bundle
+  const sealed = await sealBundle(refreshedLogin, env.BUNDLE_KEY);
+
+  // The old refresh token is spent at this point, so the new login
   // must land even through a transient KV failure.
-  await withRetries(async () =>
-    env.CODEX_AUTH.put(
-      BUNDLE_KEY,
-      await sealBundle(refreshedBundle, env.BUNDLE_KEY),
-    ),
-  );
-  await env.CODEX_AUTH.put(
-    STATUS_KEY,
-    JSON.stringify({ last_attempt_at: attemptedAt, last_error: null }),
-  );
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await env.CODEX_AUTH.put(BUNDLE_KV_KEY, sealed);
+      break;
+    } catch (error) {
+      if (attempt === KV_PUT_ATTEMPTS) {
+        console.error(
+          `Unable to store the refreshed Codex login after ${KV_PUT_ATTEMPTS} attempts: ${error.message}`,
+        );
+
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
+  }
+
+  await updateStatus(env, { last_attempt_at: attemptedAt, last_error: null });
 
   return { refreshed: true };
 }
@@ -189,14 +199,14 @@ async function requestRefresh(refreshToken) {
   return body;
 }
 
-function withRefreshedTokens(bundle, response, refreshedAt) {
+function withRefreshedTokens(login, response, refreshedAt) {
   return {
-    ...bundle,
+    ...login,
     tokens: {
-      ...bundle.tokens,
+      ...login.tokens,
       access_token: response.access_token,
-      id_token: response.id_token ?? bundle.tokens.id_token,
-      refresh_token: response.refresh_token ?? bundle.tokens.refresh_token,
+      id_token: response.id_token ?? login.tokens.id_token,
+      refresh_token: response.refresh_token ?? login.tokens.refresh_token,
     },
     last_refresh: refreshedAt,
   };
@@ -206,28 +216,35 @@ function withRefreshedTokens(bundle, response, refreshedAt) {
  * The login a client stores as its Codex auth.json. The empty
  * refresh token keeps clients from refreshing on their own.
  */
-function consumerLogin(bundle) {
+function clientLogin(login) {
   return {
     auth_mode: "chatgpt",
     OPENAI_API_KEY: null,
     tokens: {
-      id_token: bundle.tokens.id_token,
-      access_token: bundle.tokens.access_token,
+      id_token: login.tokens.id_token,
+      access_token: login.tokens.access_token,
       refresh_token: "",
-      account_id: bundle.tokens.account_id,
+      account_id: login.tokens.account_id,
     },
-    last_refresh: bundle.last_refresh,
+    last_refresh: login.last_refresh,
   };
 }
 
-async function loadBundle(env) {
-  const sealed = await env.CODEX_AUTH.get(BUNDLE_KEY);
+async function loadLogin(env) {
+  const sealed = await env.CODEX_AUTH.get(BUNDLE_KV_KEY);
 
   return sealed ? openBundle(sealed, env.BUNDLE_KEY) : null;
 }
 
 async function loadStatus(env) {
-  return (await env.CODEX_AUTH.get(STATUS_KEY, "json")) ?? {};
+  return (await env.CODEX_AUTH.get(STATUS_KV_KEY, "json")) ?? {};
+}
+
+async function updateStatus(env, fields) {
+  await env.CODEX_AUTH.put(
+    STATUS_KV_KEY,
+    JSON.stringify({ ...(await loadStatus(env)), ...fields }),
+  );
 }
 
 /**
@@ -258,28 +275,9 @@ async function digest(value) {
   );
 }
 
-async function withRetries(operation, attempts = 3) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt === attempts) {
-        console.error(
-          `Unable to store the refreshed Codex login after ${attempts} attempts: ${error.message}`,
-        );
-
-        throw error;
-      }
-    }
-  }
-}
-
 function json(body, status = 200) {
-  return new Response(JSON.stringify(body), {
+  return Response.json(body, {
     status,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    },
+    headers: { "Cache-Control": "no-store" },
   });
 }

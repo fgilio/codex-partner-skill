@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // Reports where Codex gets its login, and fetches a token-worker login when CODEX_TOKEN_URL is set.
 
-import { ensureCloudAuth, main, parseArguments, printJson } from "./lib.mjs";
+import {
+  PartnerError,
+  ensureCodexLogin,
+  main,
+  parseArguments,
+  printJson,
+} from "./lib.mjs";
 
 const USAGE = `Usage: codex-partner-auth.mjs [--quiet]
 
@@ -15,19 +21,25 @@ Options:
 `;
 
 main(async () => {
-  const { flags } = parseArguments(process.argv.slice(2), {
+  const { flags, positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
     booleanFlags: ["quiet"],
   });
 
+  if (positionals.length > 0) {
+    throw new PartnerError(
+      `codex-partner-auth.mjs takes no arguments.\n\n${USAGE}`,
+    );
+  }
+
   if (!flags.quiet) {
-    printJson(ensureCloudAuth());
+    printJson(ensureCodexLogin());
 
     return;
   }
 
   try {
-    ensureCloudAuth();
+    ensureCodexLogin();
   } catch (error) {
     process.stderr.write(
       `${JSON.stringify({ error: `codex-partner: ${error.message}` })}\n`,

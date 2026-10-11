@@ -32,6 +32,12 @@ if (process.env.FAKE_CODEX_MODE !== "no-thread") {
   emit({ type: "thread.started", thread_id: threadId });
 }
 
+if (process.env.FAKE_CODEX_DELAY_MS) {
+  await new Promise((resolve) =>
+    setTimeout(resolve, Number(process.env.FAKE_CODEX_DELAY_MS)),
+  );
+}
+
 const reply = `reply to: ${stdin.trim()}`;
 
 emit({

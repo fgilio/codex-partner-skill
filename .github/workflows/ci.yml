@@ -57,7 +57,7 @@ jobs:
           done
 
   # A frontmatter typo ships silently and only surfaces when the skill fails
-  # to load, so parse it here. A no-op in repos without a skills/ directory.
+  # to load, so parse it here.
   validate-skills:
     runs-on: ubuntu-latest
     steps:

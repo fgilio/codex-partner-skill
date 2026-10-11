@@ -4,14 +4,14 @@
 import {
   PartnerError,
   assertPartnerName,
-  findSession,
+  findPartner,
   isPartner,
-  loadSessions,
+  loadPartners,
   main,
   parseArguments,
   printJson,
   repositoryRoot,
-  updateSessions,
+  updatePartners,
 } from "./lib.mjs";
 
 const USAGE = `Usage: codex-partner-forget.mjs <name>
@@ -35,17 +35,17 @@ main(async () => {
   }
 
   const repository = repositoryRoot();
-  const session = findSession(loadSessions(), repository, name);
+  const partner = findPartner(loadPartners(), repository, name);
 
-  if (!session) {
+  if (!partner) {
     throw new PartnerError(
       `No partner named "${name}" exists in ${repository}. List them with codex-partner-list.mjs.`,
     );
   }
 
-  updateSessions((sessions) =>
-    sessions.filter((saved) => !isPartner(saved, repository, name)),
+  updatePartners((partners) =>
+    partners.filter((saved) => !isPartner(saved, repository, name)),
   );
 
-  printJson({ forgotten: name, thread_id: session.thread_id });
+  printJson({ name, thread_id: partner.thread_id, forgotten: true });
 });
