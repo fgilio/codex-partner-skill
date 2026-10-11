@@ -7,6 +7,7 @@ const args = process.argv.slice(2);
 
 const stdin = readFileSync(0, "utf8");
 const resumeIndex = args.indexOf("resume");
+const reviewIndex = args.indexOf("review");
 const threadId =
   resumeIndex === -1
     ? (process.env.FAKE_CODEX_THREAD_ID ?? "thread-new")
@@ -38,7 +39,10 @@ if (process.env.FAKE_CODEX_DELAY_MS) {
   );
 }
 
-const reply = `reply to: ${stdin.trim()}`;
+const reply =
+  reviewIndex === -1
+    ? `reply to: ${stdin.trim()}`
+    : `review of: ${[...args.slice(reviewIndex + 1), stdin.trim()].filter(Boolean).join(" ")}`;
 
 emit({
   type: "item.completed",

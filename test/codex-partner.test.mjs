@@ -480,6 +480,203 @@ describe("partners", () => {
   });
 });
 
+describe("codex-partner-review", () => {
+  function git(...args) {
+    const result = spawnSync(
+      "git",
+      ["-c", "user.name=Test", "-c", "user.email=test@example.com", ...args],
+      { cwd: sandbox.project, encoding: "utf8" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+  }
+
+  function commitFile(name) {
+    writeFileSync(join(sandbox.project, name), `${name}\n`);
+    git("add", name);
+    git("commit", "-q", "-m", `Add ${name}`);
+  }
+
+  function editFile() {
+    writeFileSync(
+      join(sandbox.project, "cart.js"),
+      "export const total = 0;\n",
+    );
+  }
+
+  test("reviews the uncommitted changes in a read-only, ephemeral session", async () => {
+    editFile();
+
+    const result = await runScript("codex-partner-review.mjs", []);
+    const [call] = codexCalls();
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.json, {
+      target: "uncommitted changes",
+      reply: "review of: --uncommitted",
+    });
+    assert.deepEqual(call.args.slice(-3), [
+      "--ephemeral",
+      "review",
+      "--uncommitted",
+    ]);
+    assert.ok(call.args.includes('sandbox_mode="read-only"'));
+    assert.ok(
+      !call.args.some((argument) =>
+        argument.startsWith("model_reasoning_effort"),
+      ),
+    );
+  });
+
+  test("reviews the branch against origin/HEAD when the working tree is clean", async () => {
+    git("checkout", "-q", "-b", "feature");
+    commitFile("base.txt");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    commitFile("feature.txt");
+
+    const result = await runScript("codex-partner-review.mjs", []);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.json.target, "changes against origin/main");
+    assert.deepEqual(codexCalls()[0].args.slice(-3), [
+      "review",
+      "--base",
+      "origin/main",
+    ]);
+  });
+
+  test("falls back to a local main branch when origin/HEAD is missing", async () => {
+    git("checkout", "-q", "-b", "feature");
+    commitFile("base.txt");
+    git("branch", "main");
+    commitFile("feature.txt");
+
+    const result = await runScript("codex-partner-review.mjs", []);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.json.target, "changes against main");
+  });
+
+  test("refuses when the tree is clean and HEAD has no commits the default branch lacks", async () => {
+    git("checkout", "-q", "-b", "main");
+    commitFile("base.txt");
+
+    const result = await runScript("codex-partner-review.mjs", []);
+
+    assert.equal(result.status, 1);
+    assert.match(result.error, /Nothing to review/);
+    assert.deepEqual(codexCalls(), []);
+  });
+
+  test("passes --base and --commit through once git finds them", async () => {
+    git("checkout", "-q", "-b", "feature");
+    commitFile("base.txt");
+    git("branch", "main");
+    commitFile("feature.txt");
+
+    const base = await runScript("codex-partner-review.mjs", [
+      "--base",
+      "main",
+    ]);
+    const commit = await runScript("codex-partner-review.mjs", [
+      "--commit=HEAD",
+    ]);
+    const missing = await runScript("codex-partner-review.mjs", [
+      "--base",
+      "release",
+    ]);
+    const [baseCall, commitCall] = codexCalls();
+
+    assert.equal(base.json.target, "changes against main");
+    assert.deepEqual(baseCall.args.slice(-3), ["review", "--base", "main"]);
+    assert.equal(commit.json.target, "commit HEAD");
+    assert.deepEqual(commitCall.args.slice(-3), ["review", "--commit", "HEAD"]);
+    assert.equal(missing.status, 1);
+    assert.match(missing.error, /Unable to find the base branch "release"/);
+    assert.equal(codexCalls().length, 2);
+  });
+
+  test("sends instructions on stdin, and refuses them alongside a target", async () => {
+    const result = await runScript("codex-partner-review.mjs", ["-"], {
+      input: "Check the auth flow for races.",
+    });
+    const conflict = await runScript("codex-partner-review.mjs", [
+      "--base",
+      "main",
+      "Focus on auth.",
+    ]);
+    const [call] = codexCalls();
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.json.target, "custom instructions");
+    assert.deepEqual(call.args.slice(-2), ["review", "-"]);
+    assert.equal(call.stdin, "Check the auth flow for races.");
+    assert.equal(conflict.status, 1);
+    assert.match(conflict.error, /or follows instructions, not both/);
+    assert.equal(codexCalls().length, 1);
+  });
+
+  test("--as keeps the review as a partner that say continues", async () => {
+    editFile();
+
+    const reviewed = await runScript(
+      "codex-partner-review.mjs",
+      ["--as", "cart", "--effort", "high"],
+      { env: { FAKE_CODEX_THREAD_ID: "thread-7" } },
+    );
+    const continued = await runScript("codex-partner-say.mjs", [
+      "cart",
+      "I fixed P1. Check again.",
+    ]);
+    const [reviewCall, sayCall] = codexCalls();
+
+    assert.equal(reviewed.status, 0, reviewed.stderr);
+    assert.deepEqual(reviewed.json, {
+      name: "cart",
+      thread_id: "thread-7",
+      target: "uncommitted changes",
+      reply: "review of: --uncommitted",
+    });
+    assert.ok(!reviewCall.args.includes("--ephemeral"));
+    assert.ok(reviewCall.args.includes('model_reasoning_effort="high"'));
+    assert.equal(continued.status, 0, continued.stderr);
+    assert.deepEqual(sayCall.args.slice(-3), ["resume", "thread-7", "-"]);
+  });
+
+  test("--as refuses a partner name that already exists, before calling Codex", async () => {
+    await runScript("codex-partner-start.mjs", ["cart", "Hi"]);
+    editFile();
+
+    const result = await runScript("codex-partner-review.mjs", [
+      "--as",
+      "cart",
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.error, /already exists/);
+    assert.equal(codexCalls().length, 1);
+  });
+
+  test("refuses --write, --base with --commit, and a target outside a git repository", async () => {
+    const write = await runScript("codex-partner-review.mjs", ["--write"]);
+    const both = await runScript("codex-partner-review.mjs", [
+      "--base",
+      "main",
+      "--commit",
+      "HEAD",
+    ]);
+    const outside = await runScript("codex-partner-review.mjs", [], {
+      cwd: sandbox.root,
+    });
+
+    assert.match(write.error, /Unknown option --write/);
+    assert.match(both.error, /Pass --base or --commit, not both/);
+    assert.match(outside.error, /is not inside a git repository/);
+    assert.deepEqual(codexCalls(), []);
+  });
+});
+
 describe("cloud auth", () => {
   let server;
   let tokenUrl;

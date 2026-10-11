@@ -1,8 +1,8 @@
 ---
 name: codex-partner
 description: >
-  Talk with OpenAI Codex from Claude Code: a one-shot second opinion, or a named partner that remembers the conversation across turns for pair programming, design debates, and iterative reviews. Use when the user says ask Codex, get a second opinion from Codex, pair with Codex, start a Codex partner, bounce this off Codex, or names an existing partner. Brief, then weigh. Read-only unless the user asks Codex to edit. Works in local and cloud sessions.
-argument-hint: "[ask | start <name> | say <name> | list | forget <name> | auth] <message>"
+  Talk with OpenAI Codex from Claude Code: a one-shot second opinion, a code review of the changes, or a named partner that remembers the conversation across turns for pair programming, design debates, and iterative reviews. Use when the user says ask Codex, get a second opinion from Codex, have Codex review the changes, pair with Codex, start a Codex partner, bounce this off Codex, or names an existing partner. Brief, then weigh. Read-only unless the user asks Codex to edit. Works in local and cloud sessions.
+argument-hint: "[ask | review | start <name> | say <name> | list | forget <name> | auth] <message>"
 allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
@@ -15,9 +15,12 @@ Codex is a second agent with its own model and its own read of the repository. *
 | The user wants | Mode | Script |
 | --- | --- | --- |
 | One answer, no follow-up | ask | `codex-partner-ask.mjs` |
+| Findings on a change: the uncommitted work, a branch, or one commit | review | `codex-partner-review.mjs` |
 | A conversation that builds over turns: pairing, a design debate, an iterative review | partner | `codex-partner-start.mjs` once, then `codex-partner-say.mjs` |
 
 - "Ask Codex whether this regex handles emoji" → ask.
+- "Have Codex review my changes" → review. To work through the findings with Codex afterwards, review with `--as <name>`, then use say.
+- "Does Codex like this design?" → ask or a partner. A review reports only the defects a change adds.
 - "Pair with Codex on the invoice export" → start a partner named `invoice-export`, then keep using say.
 - "What does Codex think now?" while a partner exists → say to that partner. A fresh ask would lose the context the partner already holds.
 
@@ -29,6 +32,17 @@ Every script prints JSON on stdout. A failure prints `{"error": "..."}` on stder
 # One question in a throwaway session
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-ask.mjs "Does the retry loop in app/Jobs/SendInvoice.php stop after five attempts? Answer yes or no, citing the line."
 # → {"reply": "..."}
+
+# Codex's code review of the uncommitted changes, or of the branch against the default branch when the tree is clean
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs
+# → {"target": "uncommitted changes", "reply": "<findings tagged P0 to P3, with file:line>"}
+
+# Review the branch against main and keep it as a partner, so say can discuss the findings
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs --base main --as billing-review
+# → {"name": "billing-review", "thread_id": "...", "target": "changes against main", "reply": "..."}
+
+# Instructions replace the target: Codex reviews what they describe
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs "Review the changes against main. Focus on the retry logic in app/Jobs."
 
 # Start a partner
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-start.mjs invoice-export - <<'EOF'
@@ -58,6 +72,8 @@ Options for ask, start, and say:
 | `--write` | Codex may edit files and run any command, with no sandbox. |
 | `--mcp` | Keeps the MCP servers of the Codex config switched on. They are off by default. |
 
+Review takes `--effort`, `--model`, and `--mcp`, plus `--base <branch>`, `--commit <sha>`, and `--as <name>`. Its effort defaults to the Codex config. It always runs read-only, and it takes a target or instructions, never both.
+
 ## Brief
 
 Codex opens the same repository, but it never sees this conversation.
@@ -78,7 +94,7 @@ A partner keeps the context, so each later message carries only what changed: wh
 ## Wait
 
 - A question Codex answers from a few files: run it in the foreground with `timeout: 600000`.
-- A call that reads much of the repository, runs tests, or uses `--effort high` or above: run it with `run_in_background: true` and wait for the completion notification. Never poll with sleep.
+- A review, or a call that reads much of the repository, runs tests, or uses `--effort high` or above: run it with `run_in_background: true` and wait for the completion notification. Never poll with sleep.
 - In a cloud session, a background command stops after 30 minutes unless the call passes a longer `timeout`, up to 2 hours.
 - A partner answers one message at a time.
 
@@ -90,7 +106,7 @@ A partner keeps the context, so each later message carries only what changed: wh
 
 ## Edits
 
-Asks and partners run read-only: Codex reads files and runs commands that change nothing. Pass `--write` only when the user wants Codex to change files, then review its changes with `git diff` before you build on them.
+Asks, reviews, and partners run read-only: Codex reads files and runs commands that change nothing. Pass `--write` to an ask or a partner only when the user wants Codex to change files, then review its changes with `git diff` before you build on them.
 
 ## Lifetime
 

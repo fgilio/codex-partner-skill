@@ -116,14 +116,19 @@ function splitFlag(flag) {
     : [flag.slice(0, boundary), flag.slice(boundary + 1)];
 }
 
-export function parseTurnArguments(argv, usage, { defaultEffort } = {}) {
+export function parseTurnArguments(
+  argv,
+  usage,
+  { defaultEffort, valueFlags = [], allowsWrite = true } = {},
+) {
   const { flags, positionals } = parseArguments(argv, {
     usage,
-    valueFlags: ["model", "effort"],
-    booleanFlags: ["write", "mcp"],
+    valueFlags: ["model", "effort", ...valueFlags],
+    booleanFlags: allowsWrite ? ["write", "mcp"] : ["mcp"],
   });
 
   return {
+    flags,
     positionals,
     options: {
       model: flags.model,
@@ -331,6 +336,28 @@ export function runCodexTurn({
     threadId,
     isEphemeral,
     options,
+    directory,
+  });
+}
+
+/**
+ * Runs Codex's built-in code review and returns its thread id and findings.
+ *
+ * The target is review flags such as `--uncommitted`, or `-` with
+ * the review instructions on stdin.
+ */
+export function runCodexReview({
+  target,
+  instructions = "",
+  isEphemeral,
+  options,
+  directory,
+}) {
+  return runCodexExec({
+    command: ["review", ...target],
+    stdin: instructions,
+    isEphemeral,
+    options: { ...options, canWrite: false },
     directory,
   });
 }

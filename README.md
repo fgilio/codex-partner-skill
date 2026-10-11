@@ -1,11 +1,12 @@
 # codex-partner skill
 
-Talk with [OpenAI Codex](https://github.com/openai/codex) from Claude Code. Ask it for a one-shot second opinion, or start a named partner that remembers the conversation across turns, for pair programming, design debates, and iterative reviews. It runs in local sessions and in [Claude Code cloud sessions](https://code.claude.com/docs/en/claude-code-on-the-web).
+Talk with [OpenAI Codex](https://github.com/openai/codex) from Claude Code. Ask it for a one-shot second opinion, have it review your changes, or start a named partner that remembers the conversation across turns, for pair programming, design debates, and iterative reviews. It runs in local sessions and in [Claude Code cloud sessions](https://code.claude.com/docs/en/claude-code-on-the-web).
 
 Everything Claude follows lives in [SKILL.md](skills/codex-partner/SKILL.md).
 
 ```bash
 codex-partner-ask.mjs "Does the retry loop stop after five attempts?"
+codex-partner-review.mjs --base main
 codex-partner-start.mjs invoice-export "Read app/Exports and propose a split. Risks first."
 codex-partner-say.mjs invoice-export "Your risk 2 doesn't apply. Re-check risk 3."
 codex-partner-list.mjs
@@ -13,7 +14,7 @@ codex-partner-forget.mjs invoice-export
 codex-partner-auth.mjs
 ```
 
-Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox unless the call passes `--write`.
+Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox unless the call passes `--write`. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
 
 ## Requirements
 

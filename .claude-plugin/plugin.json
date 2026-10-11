@@ -1,6 +1,6 @@
 {
   "name": "codex-partner",
-  "description": "Talk with OpenAI Codex from Claude Code, as a one-shot second opinion or a named partner that remembers the conversation. Works in local and cloud sessions.",
+  "description": "Talk with OpenAI Codex from Claude Code, as a one-shot second opinion, a code review, or a named partner that remembers the conversation. Works in local and cloud sessions.",
   "author": {
     "name": "Franco Gilio"
   },
