@@ -11,9 +11,11 @@ import { accessTokenExpiry, openBundle, sealBundle } from "./bundle.mjs";
 const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
+const HOUR_MS = 60 * 60 * 1000;
+
 // The cron runs every 6 hours, so a refresh that keeps failing still
 // leaves more than a day of valid access before clients notice.
-const REFRESH_BELOW_MS = 36 * 60 * 60 * 1000;
+const DEFAULT_REFRESH_BELOW_HOURS = 36;
 const SERVE_BELOW_MS = 5 * 60 * 1000;
 
 const BUNDLE_KEY = "bundle";
@@ -96,7 +98,8 @@ export async function handleRequest(request, env) {
 
 /**
  * Refreshes the stored login once its access token has less than
- * REFRESH_BELOW_MS left. A failure leaves the stored login intact.
+ * REFRESH_BELOW_HOURS left (36 by default). A failure leaves the
+ * stored login intact.
  */
 export async function refreshIfExpiring(env, now = Date.now()) {
   const bundle = await loadBundle(env);
@@ -105,7 +108,20 @@ export async function refreshIfExpiring(env, now = Date.now()) {
     return { refreshed: false, reason: "no login stored" };
   }
 
-  if (accessTokenExpiry(bundle.tokens.access_token) - now > REFRESH_BELOW_MS) {
+  const refreshBelowHours = Number(
+    env.REFRESH_BELOW_HOURS ?? DEFAULT_REFRESH_BELOW_HOURS,
+  );
+
+  if (!(refreshBelowHours > 0)) {
+    throw new Error(
+      `REFRESH_BELOW_HOURS is "${env.REFRESH_BELOW_HOURS}". Set it to a number of hours above 0.`,
+    );
+  }
+
+  if (
+    accessTokenExpiry(bundle.tokens.access_token) - now >
+    refreshBelowHours * HOUR_MS
+  ) {
     return { refreshed: false, reason: "access token still fresh" };
   }
 

@@ -296,6 +296,28 @@ describe("scheduled refresh", () => {
     assert.equal((await readStoredLogin()).tokens.refresh_token, "refresh-2");
   });
 
+  test("REFRESH_BELOW_HOURS widens the refresh window", async () => {
+    await storeLogin(storedLogin(48 * HOUR));
+    stubOpenAi(200, {
+      access_token: makeJwt({
+        exp: Math.floor((Date.now() + 10 * 24 * HOUR) / 1000),
+      }),
+    });
+    env.REFRESH_BELOW_HOURS = "72";
+
+    assert.equal((await refreshIfExpiring(env)).refreshed, true);
+  });
+
+  test("rejects a REFRESH_BELOW_HOURS that is not a positive number", async () => {
+    await storeLogin(storedLogin(48 * HOUR));
+    env.REFRESH_BELOW_HOURS = "soon";
+
+    await assert.rejects(
+      refreshIfExpiring(env),
+      /REFRESH_BELOW_HOURS is "soon"/,
+    );
+  });
+
   test("does nothing before a login is stored", async () => {
     assert.deepEqual(await refreshIfExpiring(env), {
       refreshed: false,

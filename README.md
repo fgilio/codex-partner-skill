@@ -69,6 +69,8 @@ node scripts/seed.mjs                          # signs in to ChatGPT in the brow
 
 `seed.mjs` signs in with `codex login` in a temporary Codex home, so the worker owns a login that no other machine refreshes, then seals it under a new `BUNDLE_KEY` secret. Run it again whenever `/status` reports a refresh failure.
 
+The cron refreshes the login once its access token has less than 36 hours left. Set the `REFRESH_BELOW_HOURS` variable to move that point.
+
 ### 2. Check it
 
 ```bash
