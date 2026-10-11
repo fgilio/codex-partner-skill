@@ -546,16 +546,38 @@ describe("codex-partner-review", () => {
     ]);
   });
 
-  test("falls back to a local main branch when origin/HEAD is missing", async () => {
+  test("falls back to a local main branch when origin/HEAD is missing or points at a deleted branch", async () => {
     git("checkout", "-q", "-b", "feature");
     commitFile("base.txt");
     git("branch", "main");
     commitFile("feature.txt");
 
+    const missing = await runScript("codex-partner-review.mjs", []);
+
+    git(
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/trunk",
+    );
+
+    const dangling = await runScript("codex-partner-review.mjs", []);
+
+    assert.equal(missing.status, 0, missing.stderr);
+    assert.equal(missing.json.target, "changes against main");
+    assert.equal(dangling.status, 0, dangling.stderr);
+    assert.equal(dangling.json.target, "changes against main");
+  });
+
+  test("counts untracked files even when git status hides them", async () => {
+    git("checkout", "-q", "-b", "main");
+    commitFile("base.txt");
+    git("config", "status.showUntrackedFiles", "no");
+    editFile();
+
     const result = await runScript("codex-partner-review.mjs", []);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.json.target, "changes against main");
+    assert.equal(result.json.target, "uncommitted changes");
   });
 
   test("refuses when the tree is clean and HEAD has no commits the default branch lacks", async () => {

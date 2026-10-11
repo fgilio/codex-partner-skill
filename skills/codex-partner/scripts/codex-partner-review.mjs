@@ -129,8 +129,9 @@ function resolveTarget({ base, commit }) {
     return { label: `changes against ${base}`, arguments: ["--base", base] };
   }
 
-  // Untracked files count, as they do for `codex review --uncommitted`.
-  if (git("status", "--porcelain").stdout.trim()) {
+  // Untracked files count, as they do for `codex review --uncommitted`,
+  // whatever status.showUntrackedFiles says.
+  if (git("status", "--porcelain", "--untracked-files=normal").stdout.trim()) {
     return { label: "uncommitted changes", arguments: ["--uncommitted"] };
   }
 
@@ -150,8 +151,9 @@ function resolveTarget({ base, commit }) {
   };
 }
 
-// origin/HEAD names the branch pull requests merge into. A clone
-// without it falls back to the usual default branch names.
+// origin/HEAD names the branch pull requests merge into. A clone without
+// it, or with one that points at a deleted branch, falls back to the usual
+// default branch names.
 function findDefaultBranch() {
   const remoteHead = git(
     "symbolic-ref",
@@ -159,9 +161,13 @@ function findDefaultBranch() {
     "--short",
     "refs/remotes/origin/HEAD",
   ).stdout.trim();
-  const defaultBranch =
-    remoteHead ||
-    ["origin/main", "origin/master", "main", "master"].find(isCommit);
+  const defaultBranch = [
+    remoteHead,
+    "origin/main",
+    "origin/master",
+    "main",
+    "master",
+  ].find((ref) => ref && isCommit(ref));
 
   if (!defaultBranch) {
     throw new PartnerError(
