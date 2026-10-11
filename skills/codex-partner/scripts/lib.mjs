@@ -1,7 +1,7 @@
 /**
  * Shared runtime for the codex-partner scripts.
  *
- * Every Codex call goes through runCodexTurn(), so stdin, sandbox,
+ * Every Codex call goes through runCodexExec(), so stdin, sandbox,
  * MCP, and login handling stay in one place.
  */
 
@@ -218,6 +218,47 @@ export function findPartner(partners, repository, name) {
   return partners.find((partner) => isPartner(partner, repository, name));
 }
 
+export function assertNewPartner(repository, name) {
+  if (findPartner(loadPartners(), repository, name)) {
+    throw new PartnerError(
+      `A partner named "${name}" already exists in ${repository}. Continue it with codex-partner-say.mjs ${name}, or forget it first.`,
+    );
+  }
+}
+
+/**
+ * Saves the Codex thread a turn started as a new partner.
+ */
+export function savePartner({ name, repository, directory, threadId }) {
+  if (!threadId) {
+    throw new PartnerError(
+      "Codex replied without reporting a thread id, so the partner cannot be continued.",
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  updatePartners((partners) => {
+    if (findPartner(partners, repository, name)) {
+      throw new PartnerError(
+        `A partner named "${name}" was saved in ${repository} while Codex answered. This reply is on Codex thread ${threadId}. Continue the saved partner with codex-partner-say.mjs ${name}, or forget it first.`,
+      );
+    }
+
+    return [
+      ...partners,
+      {
+        name,
+        repository,
+        directory,
+        thread_id: threadId,
+        created_at: now,
+        last_used_at: now,
+      },
+    ];
+  });
+}
+
 /**
  * Lets one message at a time reach a partner. Codex appends every
  * turn to the same session file, so two resumes would interleave.
@@ -276,10 +317,29 @@ function isProcessAlive(pid) {
 /**
  * Runs one Codex turn and returns its thread id and final message.
  */
-export async function runCodexTurn({
+export function runCodexTurn({
   prompt,
   threadId,
   isEphemeral = false,
+  options,
+  directory,
+}) {
+  return runCodexExec({
+    // "-" reads the prompt from stdin, clear of argv length limits.
+    command: threadId ? ["resume", threadId, "-"] : ["-"],
+    stdin: prompt,
+    threadId,
+    isEphemeral,
+    options,
+    directory,
+  });
+}
+
+async function runCodexExec({
+  command,
+  stdin,
+  threadId,
+  isEphemeral,
   options,
   directory,
 }) {
@@ -302,12 +362,11 @@ export async function runCodexTurn({
       : []),
     ...(options.keepsMcpServers ? [] : mcpServerOverrides()),
     ...(isEphemeral ? ["--ephemeral"] : []),
-    // "-" reads the prompt from stdin, clear of argv length limits.
-    ...(threadId ? ["resume", threadId, "-"] : ["-"]),
+    ...command,
   ];
 
   try {
-    const run = await spawnCodex(codexArguments, prompt, directory);
+    const run = await spawnCodex(codexArguments, stdin, directory);
     const reply = existsSync(replyPath)
       ? readFileSync(replyPath, "utf8").trim()
       : "";
@@ -323,7 +382,7 @@ export async function runCodexTurn({
   }
 }
 
-function spawnCodex(codexArguments, prompt, directory) {
+function spawnCodex(codexArguments, stdin, directory) {
   return new Promise((resolve, reject) => {
     const child = spawn("codex", codexArguments, { cwd: directory });
     const stderrLines = [];
@@ -377,9 +436,9 @@ function spawnCodex(codexArguments, prompt, directory) {
       });
     });
 
-    // Codex can exit before it reads the prompt. The close handler reports that.
+    // Codex can exit before it reads stdin. The close handler reports that.
     child.stdin.on("error", () => {});
-    child.stdin.end(prompt);
+    child.stdin.end(stdin);
   });
 }
 

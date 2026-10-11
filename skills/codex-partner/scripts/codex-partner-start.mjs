@@ -3,16 +3,15 @@
 
 import {
   PartnerError,
+  assertNewPartner,
   assertPartnerName,
-  findPartner,
-  loadPartners,
   main,
   parseTurnArguments,
   printJson,
   readPrompt,
   repositoryRoot,
   runCodexTurn,
-  updatePartners,
+  savePartner,
 } from "./lib.mjs";
 
 const USAGE = `Usage: codex-partner-start.mjs <name> [options] <prompt | ->
@@ -47,11 +46,7 @@ main(async () => {
   const directory = process.cwd();
   const repository = repositoryRoot();
 
-  if (findPartner(loadPartners(), repository, name)) {
-    throw new PartnerError(
-      `A partner named "${name}" already exists in ${repository}. Continue it with codex-partner-say.mjs ${name}, or forget it first.`,
-    );
-  }
+  assertNewPartner(repository, name);
 
   const turn = await runCodexTurn({
     prompt: readPrompt(promptArgument, USAGE),
@@ -59,33 +54,7 @@ main(async () => {
     directory,
   });
 
-  if (!turn.threadId) {
-    throw new PartnerError(
-      "Codex replied without reporting a thread id, so the partner cannot be continued.",
-    );
-  }
-
-  const now = new Date().toISOString();
-
-  updatePartners((partners) => {
-    if (findPartner(partners, repository, name)) {
-      throw new PartnerError(
-        `A partner named "${name}" was saved in ${repository} while Codex answered. This reply is on Codex thread ${turn.threadId}. Continue the saved partner with codex-partner-say.mjs ${name}, or forget it first.`,
-      );
-    }
-
-    return [
-      ...partners,
-      {
-        name,
-        repository,
-        directory,
-        thread_id: turn.threadId,
-        created_at: now,
-        last_used_at: now,
-      },
-    ];
-  });
+  savePartner({ name, repository, directory, threadId: turn.threadId });
 
   printJson({ name, thread_id: turn.threadId, reply: turn.reply });
 });
