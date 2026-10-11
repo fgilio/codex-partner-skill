@@ -3,9 +3,11 @@
 
 import {
   PartnerError,
+  TURN_FLAGS,
   assertPartnerName,
   findSession,
   holdPartnerLock,
+  isPartner,
   loadSessions,
   main,
   parseArguments,
@@ -34,8 +36,7 @@ Pass - as the prompt to read it from stdin.
 main(async () => {
   const { flags, positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
-    valueFlags: ["model", "effort"],
-    booleanFlags: ["write", "mcp"],
+    ...TURN_FLAGS,
   });
   const [name, promptArgument, ...extra] = positionals;
 
@@ -64,12 +65,12 @@ main(async () => {
     prompt,
     threadId: session.thread_id,
     options: turnOptions(flags),
-    directory: session.directory ?? repository,
+    directory: session.directory,
   });
 
   updateSessions((sessions) =>
     sessions.map((saved) =>
-      saved.repository === repository && saved.name === name
+      isPartner(saved, repository, name)
         ? { ...saved, last_used_at: new Date().toISOString() }
         : saved,
     ),

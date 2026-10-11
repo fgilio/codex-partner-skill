@@ -3,6 +3,7 @@
 
 import {
   PartnerError,
+  TURN_FLAGS,
   main,
   parseArguments,
   printJson,
@@ -27,8 +28,7 @@ Pass - as the prompt to read it from stdin.
 main(async () => {
   const { flags, positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
-    valueFlags: ["model", "effort"],
-    booleanFlags: ["write", "mcp"],
+    ...TURN_FLAGS,
   });
 
   if (positionals.length > 1) {

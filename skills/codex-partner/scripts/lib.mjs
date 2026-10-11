@@ -22,6 +22,8 @@ import { dirname, join } from "node:path";
 
 const PARTNER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SANDBOX_MODES = ["read-only", "bypass"];
+const CODEX_MISSING =
+  "Unable to find the codex executable on PATH. Install it with `npm install -g @openai/codex`, then try again.";
 
 // Codex refreshes a token 5 minutes before it expires, and a worker-issued
 // login has no refresh token, so fetch a new one well before that point.
@@ -137,16 +139,15 @@ export function assertPartnerName(name, usage) {
   }
 }
 
-export function repositoryRoot(directory = process.cwd()) {
+export function repositoryRoot() {
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-    cwd: directory,
     encoding: "utf8",
   });
 
-  return result.status === 0 ? result.stdout.trim() : directory;
+  return result.status === 0 ? result.stdout.trim() : process.cwd();
 }
 
-export function partnerHome() {
+function partnerHome() {
   if (process.env.CODEX_PARTNER_HOME) {
     return process.env.CODEX_PARTNER_HOME;
   }
@@ -167,20 +168,11 @@ function sessionsPath() {
 
 export function loadSessions() {
   const path = sessionsPath();
-
-  if (!existsSync(path)) {
-    return [];
-  }
-
-  let sessions;
-
-  try {
-    sessions = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    throw new PartnerError(
-      `Unable to parse ${path}. Move the file aside, then start the partner again.`,
-    );
-  }
+  const sessions =
+    readJsonIfPresent(
+      path,
+      "Move the file aside, then start the partner again.",
+    ) ?? [];
 
   if (!Array.isArray(sessions)) {
     throw new PartnerError(
@@ -203,10 +195,12 @@ export function updateSessions(change) {
   return sessions;
 }
 
+export function isPartner(session, repository, name) {
+  return session.repository === repository && session.name === name;
+}
+
 export function findSession(sessions, repository, name) {
-  return sessions.find(
-    (session) => session.repository === repository && session.name === name,
-  );
+  return sessions.find((session) => isPartner(session, repository, name));
 }
 
 /**
@@ -264,6 +258,11 @@ function isProcessAlive(pid) {
   }
 }
 
+export const TURN_FLAGS = {
+  valueFlags: ["model", "effort"],
+  booleanFlags: ["write", "mcp"],
+};
+
 export function turnOptions(flags, { defaultEffort } = {}) {
   return {
     model: flags.model ?? process.env.CODEX_PARTNER_MODEL,
@@ -286,7 +285,6 @@ export async function runCodexTurn({
   options,
   directory,
 }) {
-  assertCodexInstalled();
   ensureCloudAuth();
 
   const scratch = mkdtempSync(join(tmpdir(), "codex-partner-"));
@@ -326,10 +324,7 @@ export async function runCodexTurn({
 
 function spawnCodex(codexArguments, prompt, directory) {
   return new Promise((resolve, reject) => {
-    const child = spawn("codex", codexArguments, {
-      cwd: directory,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const child = spawn("codex", codexArguments, { cwd: directory });
     const stderrLines = [];
     const errorMessages = [];
     let startedThreadId;
@@ -345,7 +340,7 @@ function spawnCodex(codexArguments, prompt, directory) {
       pendingStdout = lines.pop();
 
       for (const line of lines) {
-        const event = parseEvent(line);
+        const event = parseJsonOrNull(line);
 
         if (event?.type === "thread.started") {
           startedThreadId = event.thread_id;
@@ -366,7 +361,9 @@ function spawnCodex(codexArguments, prompt, directory) {
       stderrLines.push(...chunk.split("\n").filter(Boolean)),
     );
 
-    child.on("error", reject);
+    child.on("error", (error) =>
+      reject(error.code === "ENOENT" ? new PartnerError(CODEX_MISSING) : error),
+    );
     child.on("close", (exitCode, signal) => {
       process.off("SIGINT", forwardSignal);
       process.off("SIGTERM", forwardSignal);
@@ -384,9 +381,9 @@ function spawnCodex(codexArguments, prompt, directory) {
   });
 }
 
-function parseEvent(line) {
+function parseJsonOrNull(text) {
   try {
-    return JSON.parse(line);
+    return JSON.parse(text);
   } catch {
     return null;
   }
@@ -403,16 +400,6 @@ function describeCodexFailure(run, threadId) {
     : "";
 
   return `Codex ${outcome} without a reply${detail ? `: ${detail}` : "."}${hint}`;
-}
-
-function assertCodexInstalled() {
-  const probe = spawnSync("codex", ["--version"], { encoding: "utf8" });
-
-  if (probe.error?.code === "ENOENT") {
-    throw new PartnerError(
-      "Unable to find the codex executable on PATH. Install it with `npm install -g @openai/codex`, then try again.",
-    );
-  }
 }
 
 function sandboxArguments(canWrite) {
@@ -435,7 +422,8 @@ function sandboxArguments(canWrite) {
  * Turns off every MCP server named in the Codex config.
  *
  * Only bare TOML keys can be addressed: the --config parser splits
- * on every dot, so a quoted name such as "a.b" stays enabled.
+ * on every dot, so a quoted name such as "a.b" stays enabled. An
+ * `mcp_servers={}` override merges into the table and changes nothing.
  */
 function mcpServerOverrides() {
   const configPath = join(codexHome(), "config.toml");
@@ -472,34 +460,29 @@ export function ensureCloudAuth() {
   }
 
   const authPath = join(codexHome(), "auth.json");
-  const currentAuth = readJsonIfPresent(authPath);
+  const currentAuth = readJsonIfPresent(
+    authPath,
+    "Run `codex login`, or delete the file to use the token worker.",
+  );
 
   if (currentAuth && !isWorkerIssued(currentAuth)) {
     return { source: "codex-login" };
   }
 
-  const currentExpiry = currentAuth
-    ? accessTokenExpiry(currentAuth.tokens.access_token)
-    : null;
+  let expiry = accessTokenExpiry(currentAuth?.tokens.access_token);
+  const fetched = !expiry || expiry - Date.now() <= REFETCH_BELOW_MS;
 
-  if (currentExpiry && currentExpiry - Date.now() > REFETCH_BELOW_MS) {
-    return {
-      source: "token-worker",
-      expires_at: new Date(currentExpiry).toISOString(),
-      fetched: false,
-    };
+  if (fetched) {
+    const fetchedAuth = fetchWorkerAuth(tokenUrl);
+
+    writeJsonAtomically(authPath, fetchedAuth, 0o600);
+    expiry = accessTokenExpiry(fetchedAuth.tokens.access_token);
   }
-
-  const fetchedAuth = fetchWorkerAuth(tokenUrl);
-
-  writeJsonAtomically(authPath, fetchedAuth, 0o600);
 
   return {
     source: "token-worker",
-    expires_at: new Date(
-      accessTokenExpiry(fetchedAuth.tokens.access_token),
-    ).toISOString(),
-    fetched: true,
+    expires_at: new Date(expiry).toISOString(),
+    fetched,
   };
 }
 
@@ -549,7 +532,7 @@ function fetchWorkerAuth(tokenUrl) {
 
   const boundary = result.stdout.lastIndexOf("\n");
   const status = Number(result.stdout.slice(boundary + 1));
-  const body = parseEvent(result.stdout.slice(0, boundary));
+  const body = parseJsonOrNull(result.stdout.slice(0, boundary));
 
   if (status === 401) {
     throw new PartnerError(
@@ -565,7 +548,6 @@ function fetchWorkerAuth(tokenUrl) {
 
   if (
     !isWorkerIssued(body ?? {}) ||
-    !body.tokens.access_token ||
     !accessTokenExpiry(body.tokens.access_token)
   ) {
     throw new PartnerError(
@@ -586,7 +568,7 @@ function safeHost(url) {
   }
 }
 
-export function accessTokenExpiry(accessToken) {
+function accessTokenExpiry(accessToken) {
   const payload =
     typeof accessToken === "string" ? accessToken.split(".")[1] : undefined;
 
@@ -605,7 +587,7 @@ export function accessTokenExpiry(accessToken) {
   }
 }
 
-function readJsonIfPresent(path) {
+function readJsonIfPresent(path, fix) {
   if (!existsSync(path)) {
     return null;
   }
@@ -613,9 +595,7 @@ function readJsonIfPresent(path) {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch {
-    throw new PartnerError(
-      `Unable to parse ${path}. Run \`codex login\`, or delete the file to use the token worker.`,
-    );
+    throw new PartnerError(`Unable to parse ${path}. ${fix}`);
   }
 }
 

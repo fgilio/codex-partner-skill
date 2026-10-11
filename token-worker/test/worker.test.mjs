@@ -7,6 +7,7 @@ import {
   sealBundle,
 } from "../src/bundle.mjs";
 import { handleRequest, refreshIfExpiring } from "../src/index.mjs";
+import { makeJwt } from "../../test/fixtures/jwt.mjs";
 
 const HOUR = 60 * 60 * 1000;
 const originalFetch = globalThis.fetch;
@@ -30,13 +31,6 @@ class MemoryKv {
 
     this.values.set(key, value);
   }
-}
-
-function makeJwt(claims) {
-  const encode = (value) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-
-  return `${encode({ alg: "none" })}.${encode(claims)}.signature`;
 }
 
 function storedLogin(expiresInMs) {
@@ -135,8 +129,8 @@ describe("GET /auth.json", () => {
     );
   });
 
-  test("refuses an expired access token and names the last refresh failure", async () => {
-    await storeLogin(storedLogin(-HOUR));
+  test("refuses an access token with less than an hour left and names the last refresh failure", async () => {
+    await storeLogin(storedLogin(HOUR / 2));
     await env.CODEX_AUTH.put(
       "status",
       JSON.stringify({ last_error: "OpenAI answered 400 (invalid_grant)." }),
@@ -147,7 +141,7 @@ describe("GET /auth.json", () => {
     assert.equal(response.status, 503);
     assert.match(
       (await response.json()).error,
-      /expired\. The last refresh failed: OpenAI answered 400 \(invalid_grant\)/,
+      /less than an hour left\. The last refresh failed: OpenAI answered 400 \(invalid_grant\)/,
     );
   });
 

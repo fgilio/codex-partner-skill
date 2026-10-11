@@ -5,11 +5,6 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
 
-if (args[0] === "--version") {
-  process.stdout.write("codex-cli 0.0.0-fake\n");
-  process.exit(0);
-}
-
 const stdin = readFileSync(0, "utf8");
 const resumeIndex = args.indexOf("resume");
 const threadId =

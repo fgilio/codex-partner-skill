@@ -16,9 +16,16 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  PartnerError,
+  codexHome,
+  main,
+  parseArguments,
+  printJson,
+} from "../../skills/codex-partner/scripts/lib.mjs";
 import {
   accessTokenExpiry,
   generateBundleKey,
@@ -36,11 +43,6 @@ Requires wrangler (logged in) and CLOUDFLARE_ACCOUNT_ID for the worker's account
 
 const workerDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-function fail(message) {
-  process.stderr.write(`${JSON.stringify({ error: message })}\n`);
-  process.exit(1);
-}
-
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: workerDirectory,
@@ -49,13 +51,13 @@ function run(command, args, options = {}) {
   });
 
   if (result.error?.code === "ENOENT") {
-    fail(
+    throw new PartnerError(
       `Unable to find ${command} on PATH. Install it, then run this script again.`,
     );
   }
 
   if (result.status !== 0) {
-    fail(
+    throw new PartnerError(
       `${command} ${args.slice(0, 3).join(" ")} failed: ${(result.stderr || result.stdout || "").trim()}`,
     );
   }
@@ -65,7 +67,7 @@ function run(command, args, options = {}) {
 
 function readLogin(path) {
   if (!existsSync(path)) {
-    fail(
+    throw new PartnerError(
       `No Codex login found at ${path}. Sign in with \`codex login\`, then run this script again.`,
     );
   }
@@ -77,7 +79,7 @@ function readLogin(path) {
     !login.tokens?.refresh_token ||
     !accessTokenExpiry(login.tokens.access_token)
   ) {
-    fail(
+    throw new PartnerError(
       `${path} is not a ChatGPT login with a refresh token. Sign in with ChatGPT, not an API key.`,
     );
   }
@@ -85,116 +87,108 @@ function readLogin(path) {
   return login;
 }
 
-function signInToDedicatedHome(codexHome) {
+function signInToDedicatedHome(dedicatedHome) {
   process.stderr.write(
     "Opening the ChatGPT sign-in for a login only the worker uses...\n",
   );
 
   // Codex refuses to start when CODEX_HOME points at a missing directory.
-  mkdirSync(codexHome, { mode: 0o700 });
+  mkdirSync(dedicatedHome, { mode: 0o700 });
 
   const result = spawnSync(
     "codex",
     ["login", "--config", 'cli_auth_credentials_store="file"'],
     {
-      env: { ...process.env, CODEX_HOME: codexHome },
-      stdio: ["inherit", "inherit", "inherit"],
+      env: { ...process.env, CODEX_HOME: dedicatedHome },
+      stdio: "inherit",
     },
   );
 
   if (result.status !== 0) {
-    fail(
+    throw new PartnerError(
       "`codex login` did not finish. Run this script again and complete the sign-in in the browser.",
     );
   }
 
-  return join(codexHome, "auth.json");
+  return join(dedicatedHome, "auth.json");
 }
 
-const argv = process.argv.slice(2);
+main(async () => {
+  const { flags, positionals } = parseArguments(process.argv.slice(2), {
+    usage: USAGE,
+    valueFlags: ["auth"],
+  });
 
-if (argv.includes("--help") || argv.includes("-h")) {
-  process.stdout.write(USAGE);
-  process.exit(0);
-}
-
-if (argv.length > 0 && (argv[0] !== "--auth" || argv.length !== 2)) {
-  fail(`Unknown arguments: ${argv.join(" ")}\n\n${USAGE}`);
-}
-
-if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
-  fail(
-    "Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account that hosts the worker.",
-  );
-}
-
-const scratch = mkdtempSync(join(tmpdir(), "codex-token-seed-"));
-
-try {
-  const loginPath =
-    argv[0] === "--auth"
-      ? resolve(argv[1])
-      : signInToDedicatedHome(join(scratch, "codex-home"));
-  const sharedLoginPath = join(
-    process.env.CODEX_HOME || join(homedir(), ".codex"),
-    "auth.json",
-  );
-
-  // A login another machine refreshes would spend the worker's
-  // refresh token, so the everyday Codex login is never accepted.
-  if (
-    existsSync(sharedLoginPath) &&
-    realpathSync(loginPath) === realpathSync(sharedLoginPath)
-  ) {
-    fail(
-      `${loginPath} is the Codex login this machine refreshes. Run the script without --auth to create a dedicated one.`,
+  if (positionals.length > 0) {
+    throw new PartnerError(
+      `Unknown arguments: ${positionals.join(" ")}\n\n${USAGE}`,
     );
   }
 
-  const login = readLogin(loginPath);
-  const bundleKey = generateBundleKey();
-  const sealedPath = join(scratch, "bundle.json");
+  if (!process.env.CLOUDFLARE_ACCOUNT_ID) {
+    throw new PartnerError(
+      "Set CLOUDFLARE_ACCOUNT_ID to the Cloudflare account that hosts the worker.",
+    );
+  }
 
-  writeFileSync(sealedPath, await sealBundle(login, bundleKey), {
-    mode: 0o600,
-  });
+  const scratch = mkdtempSync(join(tmpdir(), "codex-token-seed-"));
 
-  run("wrangler", [
-    "kv",
-    "key",
-    "put",
-    "bundle",
-    "--binding",
-    "CODEX_AUTH",
-    "--remote",
-    "--path",
-    sealedPath,
-  ]);
-  run("wrangler", ["secret", "put", "BUNDLE_KEY"], { input: bundleKey });
-  run("wrangler", [
-    "kv",
-    "key",
-    "put",
-    "status",
-    JSON.stringify({ seeded_at: new Date().toISOString(), last_error: null }),
-    "--binding",
-    "CODEX_AUTH",
-    "--remote",
-  ]);
+  try {
+    const loginPath = flags.auth
+      ? resolve(flags.auth)
+      : signInToDedicatedHome(join(scratch, "codex-home"));
+    const sharedLoginPath = join(codexHome(), "auth.json");
 
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        seeded: true,
-        account_id: login.tokens.account_id,
-        access_expires_at: new Date(
-          accessTokenExpiry(login.tokens.access_token),
-        ).toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-  );
-} finally {
-  rmSync(scratch, { recursive: true, force: true });
-}
+    // A login another machine refreshes would spend the worker's
+    // refresh token, so the everyday Codex login is never accepted.
+    if (
+      existsSync(sharedLoginPath) &&
+      realpathSync(loginPath) === realpathSync(sharedLoginPath)
+    ) {
+      throw new PartnerError(
+        `${loginPath} is the Codex login this machine refreshes. Run the script without --auth to create a dedicated one.`,
+      );
+    }
+
+    const login = readLogin(loginPath);
+    const bundleKey = generateBundleKey();
+    const sealedPath = join(scratch, "bundle.json");
+
+    writeFileSync(sealedPath, await sealBundle(login, bundleKey), {
+      mode: 0o600,
+    });
+
+    run("wrangler", [
+      "kv",
+      "key",
+      "put",
+      "bundle",
+      "--binding",
+      "CODEX_AUTH",
+      "--remote",
+      "--path",
+      sealedPath,
+    ]);
+    run("wrangler", ["secret", "put", "BUNDLE_KEY"], { input: bundleKey });
+    run("wrangler", [
+      "kv",
+      "key",
+      "put",
+      "status",
+      JSON.stringify({ seeded_at: new Date().toISOString(), last_error: null }),
+      "--binding",
+      "CODEX_AUTH",
+      "--remote",
+    ]);
+
+    printJson({
+      seeded: true,
+      account_id: login.tokens.account_id,
+      access_expires_at: new Date(
+        accessTokenExpiry(login.tokens.access_token),
+      ).toISOString(),
+    });
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});

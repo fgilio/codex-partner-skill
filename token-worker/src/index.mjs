@@ -16,7 +16,10 @@ const HOUR_MS = 60 * 60 * 1000;
 // The cron runs every 6 hours, so a refresh that keeps failing still
 // leaves more than a day of valid access before clients notice.
 const DEFAULT_REFRESH_BELOW_HOURS = 36;
-const SERVE_BELOW_MS = 5 * 60 * 1000;
+
+// Clients fetch a new token once theirs has less than an hour left,
+// so a token closer to expiry than that is never served.
+const SERVE_BELOW_MS = HOUR_MS;
 
 const BUNDLE_KEY = "bundle";
 const STATUS_KEY = "status";
@@ -24,7 +27,7 @@ const SEED_HINT =
   "Run `node token-worker/scripts/seed.mjs` to store a fresh login.";
 
 export default {
-  fetch: (request, env) => handleRequest(request, env),
+  fetch: handleRequest,
   scheduled: (controller, env, context) =>
     context.waitUntil(refreshIfExpiring(env)),
 };
@@ -71,24 +74,24 @@ export async function handleRequest(request, env) {
     return json({ error: `No Codex login is stored. ${SEED_HINT}` }, 503);
   }
 
-  const status = (await env.CODEX_AUTH.get(STATUS_KEY, "json")) ?? {};
   const expiresAt = accessTokenExpiry(bundle.tokens.access_token);
 
   if (pathname === "/status") {
     return json({
       access_expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       last_refresh: bundle.last_refresh ?? null,
-      ...status,
+      ...(await loadStatus(env)),
     });
   }
 
   if (!expiresAt || expiresAt - Date.now() < SERVE_BELOW_MS) {
-    const cause = status.last_error
-      ? ` The last refresh failed: ${status.last_error}`
-      : "";
+    const { last_error: lastError } = await loadStatus(env);
+    const cause = lastError ? ` The last refresh failed: ${lastError}` : "";
 
     return json(
-      { error: `The stored access token is expired.${cause} ${SEED_HINT}` },
+      {
+        error: `The stored access token has less than an hour left.${cause} ${SEED_HINT}`,
+      },
       503,
     );
   }
@@ -221,6 +224,10 @@ async function loadBundle(env) {
   const sealed = await env.CODEX_AUTH.get(BUNDLE_KEY);
 
   return sealed ? openBundle(sealed, env.BUNDLE_KEY) : null;
+}
+
+async function loadStatus(env) {
+  return (await env.CODEX_AUTH.get(STATUS_KEY, "json")) ?? {};
 }
 
 /**

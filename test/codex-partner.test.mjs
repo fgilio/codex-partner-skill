@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { makeJwt } from "./fixtures/jwt.mjs";
 
 const repositoryDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const scriptsDirectory = join(
@@ -36,24 +38,26 @@ function createSandbox() {
   const root = mkdtempSync(join(tmpdir(), "codex-partner-test-"));
   const binDirectory = join(root, "bin");
   const project = join(root, "project");
+  const codexHome = join(root, "codex-home");
+  const log = join(root, "codex-calls.jsonl");
 
   mkdirSync(binDirectory);
   mkdirSync(join(project, "src"), { recursive: true });
   copyFileSync(fakeCodexSource, join(binDirectory, "codex"));
-  spawnSync("chmod", ["755", join(binDirectory, "codex")]);
+  chmodSync(join(binDirectory, "codex"), 0o755);
   spawnSync("git", ["init", "-q"], { cwd: project });
 
   return {
     root,
     project,
-    codexHome: join(root, "codex-home"),
-    log: join(root, "codex-calls.jsonl"),
+    codexHome,
+    log,
     env: {
       PATH: `${binDirectory}:${process.env.PATH}`,
       HOME: root,
-      CODEX_HOME: join(root, "codex-home"),
+      CODEX_HOME: codexHome,
       CODEX_PARTNER_HOME: join(root, "state"),
-      FAKE_CODEX_LOG: join(root, "codex-calls.jsonl"),
+      FAKE_CODEX_LOG: log,
     },
   };
 }
@@ -67,11 +71,7 @@ function runScript(
     const child = spawn(
       process.execPath,
       [join(scriptsDirectory, script), ...args],
-      {
-        cwd,
-        env: { ...sandbox.env, ...env },
-        stdio: ["pipe", "pipe", "pipe"],
-      },
+      { cwd, env: { ...sandbox.env, ...env } },
     );
     let stdout = "";
     let stderr = "";
@@ -108,11 +108,8 @@ function codexCalls() {
     : [];
 }
 
-function makeJwt(claims) {
-  const encode = (value) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
-
-  return `${encode({ alg: "none" })}.${encode(claims)}.signature`;
+function lockPath(threadId) {
+  return join(sandbox.env.CODEX_PARTNER_HOME, "locks", `${threadId}.lock`);
 }
 
 function workerLogin(expiresInMs) {
@@ -169,13 +166,7 @@ describe("codex-partner-ask", () => {
     });
     const [flagged, defaulted] = codexCalls();
 
-    assert.deepEqual(
-      flagged.args.slice(
-        flagged.args.indexOf("--model"),
-        flagged.args.indexOf("--model") + 2,
-      ),
-      ["--model", "model-a"],
-    );
+    assert.equal(flagged.args[flagged.args.indexOf("--model") + 1], "model-a");
     assert.ok(flagged.args.includes('model_reasoning_effort="high"'));
     assert.ok(defaulted.args.includes("model-b"));
     assert.ok(defaulted.args.includes('model_reasoning_effort="medium"'));
@@ -395,13 +386,8 @@ describe("partner sessions", () => {
     await runScript("codex-partner-start.mjs", ["review", "Hi"], {
       env: { FAKE_CODEX_THREAD_ID: "thread-7" },
     });
-    mkdirSync(join(sandbox.env.CODEX_PARTNER_HOME, "locks"), {
-      recursive: true,
-    });
-    writeFileSync(
-      join(sandbox.env.CODEX_PARTNER_HOME, "locks", "thread-7.lock"),
-      String(process.pid),
-    );
+    mkdirSync(dirname(lockPath("thread-7")), { recursive: true });
+    writeFileSync(lockPath("thread-7"), String(process.pid));
 
     const result = await runScript("codex-partner-say.mjs", [
       "review",
@@ -422,13 +408,8 @@ describe("partner sessions", () => {
     await runScript("codex-partner-start.mjs", ["review", "Hi"], {
       env: { FAKE_CODEX_THREAD_ID: "thread-8" },
     });
-    mkdirSync(join(sandbox.env.CODEX_PARTNER_HOME, "locks"), {
-      recursive: true,
-    });
-    writeFileSync(
-      join(sandbox.env.CODEX_PARTNER_HOME, "locks", "thread-8.lock"),
-      exited.stdout,
-    );
+    mkdirSync(dirname(lockPath("thread-8")), { recursive: true });
+    writeFileSync(lockPath("thread-8"), exited.stdout);
 
     const result = await runScript("codex-partner-say.mjs", [
       "review",
@@ -436,11 +417,7 @@ describe("partner sessions", () => {
     ]);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(
-      !existsSync(
-        join(sandbox.env.CODEX_PARTNER_HOME, "locks", "thread-8.lock"),
-      ),
-    );
+    assert.ok(!existsSync(lockPath("thread-8")));
   });
 
   test("forget removes the partner so the name can start over", async () => {
@@ -473,10 +450,11 @@ describe("partner sessions", () => {
 
 describe("cloud auth", () => {
   let server;
+  let tokenUrl;
   let requests;
   let respond;
 
-  async function startTokenServer() {
+  beforeEach(async () => {
     requests = [];
     server = createServer((request, response) => {
       requests.push({
@@ -489,15 +467,14 @@ describe("cloud auth", () => {
       response.end(JSON.stringify(body));
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    tokenUrl = `http://127.0.0.1:${server.address().port}/auth.json`;
+  });
 
-    return `http://127.0.0.1:${server.address().port}/auth.json`;
-  }
+  afterEach(() => server.close());
 
   const authPath = () => join(sandbox.codexHome, "auth.json");
 
-  test("writes the worker login with mode 600 before calling Codex", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("writes the worker login with mode 600 before calling Codex", async () => {
     respond = () => [200, workerLogin(10 * 24 * 60 * 60 * 1000)];
 
     const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
@@ -514,9 +491,7 @@ describe("cloud auth", () => {
     assert.equal(statSync(authPath()).mode & 0o777, 0o600);
   });
 
-  test("reuses a stored worker login until it is about to expire", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("reuses a stored worker login until it is about to expire", async () => {
     respond = () => [200, workerLogin(10 * 24 * 60 * 60 * 1000)];
 
     await runScript("codex-partner-auth.mjs", [], {
@@ -531,9 +506,7 @@ describe("cloud auth", () => {
     assert.equal(reused.json.fetched, false);
   });
 
-  test("fetches a new login when the stored one expires within the hour", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("fetches a new login when the stored one expires within the hour", async () => {
     mkdirSync(sandbox.codexHome, { recursive: true });
     writeFileSync(authPath(), JSON.stringify(workerLogin(30 * 60 * 1000)));
     respond = () => [200, workerLogin(10 * 24 * 60 * 60 * 1000)];
@@ -546,9 +519,7 @@ describe("cloud auth", () => {
     assert.equal(requests.length, 1);
   });
 
-  test("never replaces a codex login that carries a refresh token", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("never replaces a codex login that carries a refresh token", async () => {
     const ownLogin = workerLogin(60 * 1000);
     ownLogin.tokens.refresh_token = "real-refresh-token";
     mkdirSync(sandbox.codexHome, { recursive: true });
@@ -566,9 +537,7 @@ describe("cloud auth", () => {
     );
   });
 
-  test("explains the network secret fix when the worker answers 401", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("explains the network secret fix when the worker answers 401", async () => {
     respond = () => [401, { error: "Missing or invalid bearer token." }];
 
     const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
@@ -580,9 +549,7 @@ describe("cloud auth", () => {
     assert.deepEqual(codexCalls(), []);
   });
 
-  test("relays the worker's error message for other failures", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("relays the worker's error message for other failures", async () => {
     respond = () => [503, { error: "No Codex login is stored." }];
 
     const result = await runScript("codex-partner-auth.mjs", [], {
@@ -593,9 +560,7 @@ describe("cloud auth", () => {
     assert.match(result.error, /answered 503: No Codex login is stored/);
   });
 
-  test("rejects a worker response that is not a Codex login", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("rejects a worker response that is not a Codex login", async () => {
     respond = () => [200, { hello: "world" }];
 
     const result = await runScript("codex-partner-auth.mjs", [], {
@@ -607,9 +572,7 @@ describe("cloud auth", () => {
     assert.ok(!existsSync(authPath()));
   });
 
-  test("--quiet prints nothing and exits 0 even when the worker fails", async (context) => {
-    const tokenUrl = await startTokenServer();
-    context.after(() => server.close());
+  test("--quiet prints nothing and exits 0 even when the worker fails", async () => {
     respond = () => [503, { error: "No Codex login is stored." }];
 
     const result = await runScript("codex-partner-auth.mjs", ["--quiet"], {

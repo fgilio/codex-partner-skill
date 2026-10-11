@@ -5,6 +5,7 @@ import {
   PartnerError,
   assertPartnerName,
   findSession,
+  isPartner,
   loadSessions,
   main,
   parseArguments,
@@ -43,9 +44,7 @@ main(async () => {
   }
 
   updateSessions((sessions) =>
-    sessions.filter(
-      (saved) => !(saved.repository === repository && saved.name === name),
-    ),
+    sessions.filter((saved) => !isPartner(saved, repository, name)),
   );
 
   printJson({ forgotten: name, thread_id: session.thread_id });

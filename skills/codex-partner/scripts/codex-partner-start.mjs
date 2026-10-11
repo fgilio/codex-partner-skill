@@ -3,8 +3,10 @@
 
 import {
   PartnerError,
+  TURN_FLAGS,
   assertPartnerName,
   findSession,
+  isPartner,
   loadSessions,
   main,
   parseArguments,
@@ -33,8 +35,7 @@ Pass - as the prompt to read it from stdin.
 main(async () => {
   const { flags, positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
-    valueFlags: ["model", "effort"],
-    booleanFlags: ["write", "mcp"],
+    ...TURN_FLAGS,
   });
   const [name, promptArgument, ...extra] = positionals;
 
@@ -47,7 +48,7 @@ main(async () => {
   }
 
   const directory = process.cwd();
-  const repository = repositoryRoot(directory);
+  const repository = repositoryRoot();
 
   if (findSession(loadSessions(), repository, name)) {
     throw new PartnerError(
@@ -70,10 +71,7 @@ main(async () => {
   const now = new Date().toISOString();
 
   updateSessions((sessions) => [
-    ...sessions.filter(
-      (session) =>
-        !(session.repository === repository && session.name === name),
-    ),
+    ...sessions.filter((session) => !isPartner(session, repository, name)),
     {
       name,
       repository,
