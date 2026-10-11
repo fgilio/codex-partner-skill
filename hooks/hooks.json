@@ -1,0 +1,16 @@
+{
+  "description": "Fetches a Codex login from the token worker at session start when CODEX_TOKEN_URL is set.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/codex-partner/scripts/codex-partner-auth.mjs\" --quiet",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

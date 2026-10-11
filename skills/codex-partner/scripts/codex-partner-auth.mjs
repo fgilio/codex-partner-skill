@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+// Reports where Codex gets its login, and fetches a token-worker login when CODEX_TOKEN_URL is set.
+
+import { ensureCloudAuth, main, parseArguments, printJson } from "./lib.mjs";
+
+const USAGE = `Usage: codex-partner-auth.mjs [--quiet]
+
+Without CODEX_TOKEN_URL, Codex uses its own login and nothing changes.
+With CODEX_TOKEN_URL, fetches a short-lived access token from the token worker
+when the stored one is missing or close to expiry. A login made with
+\`codex login\` is never replaced.
+
+Options:
+  --quiet   Print nothing on success and always exit 0 (for SessionStart hooks)
+`;
+
+main(async () => {
+  const { flags } = parseArguments(process.argv.slice(2), {
+    usage: USAGE,
+    booleanFlags: ["quiet"],
+  });
+
+  if (!flags.quiet) {
+    printJson(ensureCloudAuth());
+
+    return;
+  }
+
+  try {
+    ensureCloudAuth();
+  } catch (error) {
+    process.stderr.write(
+      `${JSON.stringify({ error: `codex-partner: ${error.message}` })}\n`,
+    );
+  }
+});
