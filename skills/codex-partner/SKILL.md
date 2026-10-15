@@ -26,20 +26,20 @@ Codex is a second agent with its own model and its own read of the repository. *
 
 ## Commands
 
-Every script prints JSON on stdout. A failure prints `{"error": "..."}` on stderr, exits 1, and the message names the fix. When only the user can make that fix, such as a network secret or the worker's seed script, tell the user.
+A failure prints its message on stderr and exits 1, and the message names the fix. When only the user can make that fix, such as a network secret or the worker's seed script, tell the user.
 
 ```bash
 # One question in a throwaway session
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-ask.mjs "Does the retry loop in app/Jobs/SendInvoice.php stop after five attempts? Answer yes or no, citing the line."
-# → {"reply": "..."}
 
 # Codex's code review of the uncommitted changes, or of the branch against the default branch when the tree is clean
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs
-# → {"target": "uncommitted changes", "reply": "<findings tagged P0 to P3, with file:line>"}
+# → Target: uncommitted changes
+#
+#   <findings tagged P0 to P3, with file:line>
 
 # Review the branch against main and keep it as a partner, so say can discuss the findings
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs --base main --as billing-review
-# → {"name": "billing-review", "thread_id": "...", "target": "changes against main", "reply": "..."}
 
 # Instructions replace the target: Codex reviews what they describe
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs "Review the changes against main. Focus on the retry logic in app/Jobs."
@@ -50,11 +50,9 @@ We are splitting app/Exports/InvoiceExport.php into a query object and a CSV wri
 Goal: exports of 100k invoices finish under a minute without loading every row into memory.
 Read the class and its tests, then propose the split. List the risks first.
 EOF
-# → {"name": "invoice-export", "thread_id": "...", "reply": "..."}
 
 # Continue it
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-say.mjs invoice-export "I took your split. Your risk 2 doesn't apply: the writer streams to a temp file. Re-check risk 3 against tests/Feature/InvoiceExportTest.php."
-# → {"name": "invoice-export", "thread_id": "...", "reply": "..."}
 
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-list.mjs                  # this repository's partners, most recent first (--all: every repository)
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-forget.mjs invoice-export # frees the name for a new conversation

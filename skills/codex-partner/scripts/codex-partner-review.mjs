@@ -8,7 +8,7 @@ import {
   assertPartnerName,
   main,
   parseTurnArguments,
-  printJson,
+  printResult,
   readPrompt,
   repositoryRoot,
   runCodexReview,
@@ -28,6 +28,7 @@ Options:
   --model <id>       Codex model (default: the Codex config)
   --effort <level>   Reasoning effort (default: the Codex config)
   --mcp              Keep the MCP servers from the Codex config switched on
+  --json             Print JSON with the target and reply, plus the name and thread id with --as
 
 Instructions replace the target: Codex reviews what they describe, such as
 "Review the changes against main. Focus on the retry logic." Pass - to read
@@ -35,7 +36,7 @@ them from stdin.
 `;
 
 main(async () => {
-  const { flags, positionals, options } = parseTurnArguments(
+  const { flags, positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,
     { valueFlags: ["base", "commit", "as"], allowsWrite: false },
@@ -86,20 +87,18 @@ main(async () => {
     directory,
   });
 
-  if (name === undefined) {
-    printJson({ target: target.label, reply: review.reply });
-
-    return;
+  if (name !== undefined) {
+    savePartner({ name, repository, directory, threadId: review.threadId });
   }
 
-  savePartner({ name, repository, directory, threadId: review.threadId });
-
-  printJson({
-    name,
-    thread_id: review.threadId,
-    target: target.label,
-    reply: review.reply,
-  });
+  printResult(
+    {
+      ...(name === undefined ? {} : { name, thread_id: review.threadId }),
+      target: target.label,
+      reply: review.reply,
+    },
+    { asJson, header: `Target: ${target.label}` },
+  );
 });
 
 function resolveTarget({ base, commit }) {

@@ -7,7 +7,7 @@ import {
   assertPartnerName,
   main,
   parseTurnArguments,
-  printJson,
+  printResult,
   readPrompt,
   repositoryRoot,
   runCodexTurn,
@@ -24,12 +24,13 @@ Options:
   --effort <level>   Reasoning effort (default: the Codex config)
   --write            Let Codex edit files and run any command, with no sandbox
   --mcp              Keep the MCP servers from the Codex config switched on
+  --json             Print JSON with the name, thread id, and reply
 
 Pass - as the prompt to read it from stdin.
 `;
 
 main(async () => {
-  const { positionals, options } = parseTurnArguments(
+  const { positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,
   );
@@ -56,5 +57,8 @@ main(async () => {
 
   savePartner({ name, repository, directory, threadId: turn.threadId });
 
-  printJson({ name, thread_id: turn.threadId, reply: turn.reply });
+  printResult(
+    { name, thread_id: turn.threadId, reply: turn.reply },
+    { asJson },
+  );
 });

@@ -41,8 +41,6 @@ main(async () => {
   try {
     ensureCodexLogin();
   } catch (error) {
-    process.stderr.write(
-      `${JSON.stringify({ error: `codex-partner: ${error.message}` })}\n`,
-    );
+    process.stderr.write(`codex-partner: ${error.message}\n`);
   }
 });

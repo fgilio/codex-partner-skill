@@ -39,13 +39,31 @@ export async function main(run) {
         ? error.message
         : `Unexpected failure: ${error?.stack ?? error}`;
 
-    process.stderr.write(`${JSON.stringify({ error: message })}\n`);
+    process.stderr.write(`${message}\n`);
     process.exit(1);
   }
 }
 
 export function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * Prints a Codex reply as plain text, after an optional header line,
+ * or the whole result as JSON with --json.
+ */
+export function printResult(result, { asJson, header }) {
+  if (asJson) {
+    printJson(result);
+
+    return;
+  }
+
+  if (header) {
+    process.stdout.write(`${header}\n\n`);
+  }
+
+  process.stdout.write(`${result.reply}\n`);
 }
 
 /**
@@ -124,7 +142,7 @@ export function parseTurnArguments(
   const { flags, positionals } = parseArguments(argv, {
     usage,
     valueFlags: ["model", "effort", ...valueFlags],
-    booleanFlags: allowsWrite ? ["write", "mcp"] : ["mcp"],
+    booleanFlags: ["mcp", "json", ...(allowsWrite ? ["write"] : [])],
   });
 
   return {
@@ -136,6 +154,7 @@ export function parseTurnArguments(
       canWrite: flags.write === true,
       keepsMcpServers: flags.mcp === true,
     },
+    asJson: flags.json === true,
   };
 }
 
