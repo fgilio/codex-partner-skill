@@ -5,7 +5,7 @@ import {
   PartnerError,
   main,
   parseTurnArguments,
-  printJson,
+  printResult,
   readPrompt,
   runCodexTurn,
 } from "./lib.mjs";
@@ -19,12 +19,13 @@ Options:
   --effort <level>   Reasoning effort (default: low)
   --write            Let Codex edit files and run any command, with no sandbox
   --mcp              Keep the MCP servers from the Codex config switched on
+  --json             Print JSON with the reply
 
 Pass - as the prompt to read it from stdin.
 `;
 
 main(async () => {
-  const { positionals, options } = parseTurnArguments(
+  const { positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,
     { defaultEffort: "low" },
@@ -43,5 +44,5 @@ main(async () => {
     directory: process.cwd(),
   });
 
-  printJson({ reply: turn.reply });
+  printResult({ reply: turn.reply }, { asJson });
 });

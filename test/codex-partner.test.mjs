@@ -87,7 +87,7 @@ function runScript(
         stdout,
         stderr,
         json: parseJson(stdout),
-        error: parseJson(stderr)?.error,
+        error: stderr.trim(),
       }),
     );
     child.stdin.end(input ?? "");
@@ -152,7 +152,7 @@ describe("codex-partner-ask", () => {
     const [call] = codexCalls();
 
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.json, { reply: "reply to: Does the loop stop?" });
+    assert.equal(result.stdout, "reply to: Does the loop stop?\n");
     assert.equal(call.stdin, "Does the loop stop?");
     assert.deepEqual(call.args.slice(-2), ["--ephemeral", "-"]);
     assert.ok(call.args.includes('sandbox_mode="read-only"'));
@@ -189,6 +189,13 @@ describe("codex-partner-ask", () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(codexCalls()[0].stdin, "Line one\nLine two\n");
+  });
+
+  test("--json prints the reply as JSON", async () => {
+    const result = await runScript("codex-partner-ask.mjs", ["--json", "Hi"]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.json, { reply: "reply to: Hi" });
   });
 
   test("rejects an empty prompt before calling Codex", async () => {
@@ -274,13 +281,14 @@ describe("partners", () => {
   test("start saves the partner and say resumes the same Codex thread", async () => {
     const started = await runScript(
       "codex-partner-start.mjs",
-      ["review", "Remember the plan."],
+      ["review", "--json", "Remember the plan."],
       {
         env: { FAKE_CODEX_THREAD_ID: "thread-42" },
       },
     );
     const continued = await runScript("codex-partner-say.mjs", [
       "review",
+      "--json",
       "What was the plan?",
     ]);
     const [startCall, sayCall] = codexCalls();
@@ -299,6 +307,22 @@ describe("partners", () => {
     });
     assert.ok(!startCall.args.includes("--ephemeral"));
     assert.deepEqual(sayCall.args.slice(-3), ["resume", "thread-42", "-"]);
+  });
+
+  test("start and say print the reply as plain text", async () => {
+    const started = await runScript("codex-partner-start.mjs", [
+      "review",
+      "Remember the plan.",
+    ]);
+    const continued = await runScript("codex-partner-say.mjs", [
+      "review",
+      "What was the plan?",
+    ]);
+
+    assert.equal(started.status, 0, started.stderr);
+    assert.equal(started.stdout, "reply to: Remember the plan.\n");
+    assert.equal(continued.status, 0, continued.stderr);
+    assert.equal(continued.stdout, "reply to: What was the plan?\n");
   });
 
   test("say runs Codex in the directory the partner started in", async () => {
@@ -497,6 +521,10 @@ describe("codex-partner-review", () => {
     git("commit", "-q", "-m", `Add ${name}`);
   }
 
+  function reviewTarget(result) {
+    return result.stdout.match(/^Target: (.*)\n/)?.[1];
+  }
+
   function editFile() {
     writeFileSync(
       join(sandbox.project, "cart.js"),
@@ -511,10 +539,7 @@ describe("codex-partner-review", () => {
     const [call] = codexCalls();
 
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.json, {
-      target: "uncommitted changes",
-      reply: "review of: --uncommitted",
-    });
+    assert.equal(reviewTarget(result), "uncommitted changes");
     assert.deepEqual(call.args.slice(-3), [
       "--ephemeral",
       "review",
@@ -538,7 +563,7 @@ describe("codex-partner-review", () => {
     const result = await runScript("codex-partner-review.mjs", []);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.json.target, "changes against origin/main");
+    assert.equal(reviewTarget(result), "changes against origin/main");
     assert.deepEqual(codexCalls()[0].args.slice(-3), [
       "review",
       "--base",
@@ -563,9 +588,9 @@ describe("codex-partner-review", () => {
     const dangling = await runScript("codex-partner-review.mjs", []);
 
     assert.equal(missing.status, 0, missing.stderr);
-    assert.equal(missing.json.target, "changes against main");
+    assert.equal(reviewTarget(missing), "changes against main");
     assert.equal(dangling.status, 0, dangling.stderr);
-    assert.equal(dangling.json.target, "changes against main");
+    assert.equal(reviewTarget(dangling), "changes against main");
   });
 
   test("counts untracked files even when git status hides them", async () => {
@@ -577,7 +602,7 @@ describe("codex-partner-review", () => {
     const result = await runScript("codex-partner-review.mjs", []);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.json.target, "uncommitted changes");
+    assert.equal(reviewTarget(result), "uncommitted changes");
   });
 
   test("refuses when the tree is clean and HEAD has no commits the default branch lacks", async () => {
@@ -610,9 +635,9 @@ describe("codex-partner-review", () => {
     ]);
     const [baseCall, commitCall] = codexCalls();
 
-    assert.equal(base.json.target, "changes against main");
+    assert.equal(reviewTarget(base), "changes against main");
     assert.deepEqual(baseCall.args.slice(-3), ["review", "--base", "main"]);
-    assert.equal(commit.json.target, "commit HEAD");
+    assert.equal(reviewTarget(commit), "commit HEAD");
     assert.deepEqual(commitCall.args.slice(-3), ["review", "--commit", "HEAD"]);
     assert.equal(missing.status, 1);
     assert.match(missing.error, /Unable to find the base branch "release"/);
@@ -631,7 +656,7 @@ describe("codex-partner-review", () => {
     const [call] = codexCalls();
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.json.target, "custom instructions");
+    assert.equal(reviewTarget(result), "custom instructions");
     assert.deepEqual(call.args.slice(-2), ["review", "-"]);
     assert.equal(call.stdin, "Check the auth flow for races.");
     assert.equal(conflict.status, 1);
@@ -644,7 +669,7 @@ describe("codex-partner-review", () => {
 
     const reviewed = await runScript(
       "codex-partner-review.mjs",
-      ["--as", "cart", "--effort", "high"],
+      ["--as", "cart", "--effort", "high", "--json"],
       { env: { FAKE_CODEX_THREAD_ID: "thread-7" } },
     );
     const continued = await runScript("codex-partner-say.mjs", [
@@ -664,6 +689,23 @@ describe("codex-partner-review", () => {
     assert.ok(reviewCall.args.includes('model_reasoning_effort="high"'));
     assert.equal(continued.status, 0, continued.stderr);
     assert.deepEqual(sayCall.args.slice(-3), ["resume", "thread-7", "-"]);
+  });
+
+  test("prints the target line, then the findings, with or without --as", async () => {
+    editFile();
+
+    const [ephemeral, kept] = await Promise.all([
+      runScript("codex-partner-review.mjs", []),
+      runScript("codex-partner-review.mjs", ["--as", "cart"]),
+    ]);
+
+    assert.equal(ephemeral.status, 0, ephemeral.stderr);
+    assert.equal(
+      ephemeral.stdout,
+      "Target: uncommitted changes\n\nreview of: --uncommitted\n",
+    );
+    assert.equal(kept.status, 0, kept.stderr);
+    assert.equal(kept.stdout, ephemeral.stdout);
   });
 
   test("--as refuses a partner name that already exists, before calling Codex", async () => {
