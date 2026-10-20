@@ -831,7 +831,7 @@ describe("cloud auth", () => {
     );
   });
 
-  test("explains the network secret fix when the worker answers 401", async () => {
+  test("names the missing CODEX_TOKEN_BEARER when the worker answers 401", async () => {
     respond = () => [401, { error: "Missing or invalid bearer token." }];
 
     const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
@@ -839,7 +839,28 @@ describe("cloud auth", () => {
     });
 
     assert.equal(result.status, 1);
-    assert.match(result.error, /Add a network secret for 127\.0\.0\.1/);
+    assert.match(result.error, /CODEX_TOKEN_BEARER is unset/);
+    assert.match(
+      result.error,
+      /network secret for 127\.0\.0\.1:\d+ exposed as CODEX_TOKEN_BEARER/,
+    );
+    assert.deepEqual(codexCalls(), []);
+  });
+
+  test("names the rejected serve token when the worker answers 401 to a bearer", async () => {
+    respond = () => [401, { error: "Missing or invalid bearer token." }];
+
+    const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
+      env: { CODEX_TOKEN_URL: tokenUrl, CODEX_TOKEN_BEARER: "stale-secret" },
+    });
+
+    assert.equal(result.status, 1);
+    assert.equal(requests[0].authorization, "Bearer stale-secret");
+    assert.match(
+      result.error,
+      /rejected the serve token in CODEX_TOKEN_BEARER/,
+    );
+    assert.doesNotMatch(result.error, /stale-secret/);
     assert.deepEqual(codexCalls(), []);
   });
 

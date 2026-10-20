@@ -632,7 +632,9 @@ function fetchWorkerLogin(tokenUrl) {
 
   if (status === 401) {
     throw new PartnerError(
-      `The token worker at ${host} rejected the request (401). Add a network secret for ${host} with the worker's serve token, or set CODEX_TOKEN_BEARER outside a cloud session.`,
+      process.env.CODEX_TOKEN_BEARER
+        ? `The token worker at ${host} rejected the serve token in CODEX_TOKEN_BEARER (401). Check it matches the worker's SERVE_TOKEN, then start a new session.`
+        : `The token worker at ${host} rejected the request (401): CODEX_TOKEN_BEARER is unset, so it carried no serve token. In a cloud environment, add a network secret for ${host} exposed as CODEX_TOKEN_BEARER, then start a new session.`,
     );
   }
 
