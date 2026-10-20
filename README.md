@@ -42,7 +42,7 @@ The partner list lives in `$XDG_STATE_HOME/codex-partner`, or `~/.local/state/co
 | Variable | Effect |
 | --- | --- |
 | `CODEX_TOKEN_URL` | The token worker's `/auth.json` URL. Set only in cloud environments. |
-| `CODEX_TOKEN_BEARER` | The worker's serve token, for calls from outside a cloud session. Cloud sessions use a network secret instead. |
+| `CODEX_TOKEN_BEARER` | The worker's serve token. A cloud environment sets it through a network secret, so the session holds only a placeholder. Without it the worker answers 401. |
 
 ## Cloud sessions
 
@@ -53,7 +53,7 @@ Codex refreshes a token only in its last 5 minutes. The scripts fetch a new one 
 ```
 claude.ai cloud session                     Cloudflare
 ├─ SessionStart hook / each script ──GET──▶ token worker (codex-token)
-│  (network secret adds the serve token)    ├─ cron every 6 h: refresh when < 36 h left
+│  (network secret swaps in the serve token)├─ cron every 6 h: refresh when < 36 h left
 ├─ ~/.codex/auth.json  ◀── access token ──  └─ KV: login sealed with BUNDLE_KEY
 └─ codex exec ───────────────────────────▶ chatgpt.com (your ChatGPT plan)
 ```
@@ -86,7 +86,7 @@ In the environment dialog at [claude.ai/code](https://claude.ai/code):
 
 - **Network access**: Custom, with the default list included, plus `chatgpt.com` and `api.openai.com`
 - **Environment variables**: `CODEX_TOKEN_URL=https://<worker>/auth.json`
-- **Network secrets**: one secret for the worker host, Bearer, with the serve token as the value
+- **Network secrets**: one secret for the worker host, exposed as `CODEX_TOKEN_BEARER`, with the serve token as the value
 - **Setup script**:
 
   ```bash
@@ -97,7 +97,7 @@ In the environment dialog at [claude.ai/code](https://claude.ai/code):
 
   To install the other plugins of the [fgilio marketplace](https://github.com/fgilio/claude-plugins#cloud-sessions) too, use its `cloud-setup.sh` instead. A cloud environment reruns its setup script only when the script's text changes.
 
-The network secret keeps the serve token outside the VM. Claude Code attaches it to requests for the worker host after they leave the session, and it never reaches setup-script requests, so the token fetch runs at session start through the plugin's SessionStart hook.
+The network secret keeps the serve token outside the VM. The session sees only a placeholder in `CODEX_TOKEN_BEARER`, which the scripts send as the bearer, and Claude Code swaps in the token once the request leaves the session. A request without the variable carries nothing to swap, so the worker answers 401. The swap never reaches setup-script requests, so the token fetch runs at session start through the plugin's SessionStart hook. A session reads its environment when it starts, so a session older than the secret keeps failing until you start a new one.
 
 ## Development
 
