@@ -866,6 +866,10 @@ describe("cloud auth", () => {
       result.error,
       /rejected the serve token in CODEX_TOKEN_BEARER/,
     );
+    assert.match(
+      result.error,
+      /network secret for 127\.0\.0\.1:\d+ holds the worker's SERVE_TOKEN/,
+    );
     assert.doesNotMatch(result.error, /stale-secret/);
     assert.deepEqual(codexCalls(), []);
   });
