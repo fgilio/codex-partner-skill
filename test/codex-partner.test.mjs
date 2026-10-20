@@ -9,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { once } from "node:events";
@@ -250,8 +251,13 @@ describe("codex-partner-ask", () => {
   });
 
   test("tells the user how to install Codex when it is not on PATH", async () => {
+    // Node's own directory can hold a global `codex` install, so PATH gets a link to node alone.
+    const nodeOnly = join(sandbox.root, "node-only");
+    mkdirSync(nodeOnly);
+    symlinkSync(process.execPath, join(nodeOnly, "node"));
+
     const result = await runScript("codex-partner-ask.mjs", ["Hi"], {
-      env: { PATH: dirname(process.execPath) },
+      env: { PATH: nodeOnly },
     });
 
     assert.equal(result.status, 1);
