@@ -97,7 +97,7 @@ In the environment dialog at [claude.ai/code](https://claude.ai/code):
 
   To install the other plugins of the [fgilio marketplace](https://github.com/fgilio/claude-plugins#cloud-sessions) too, use its `cloud-setup.sh` instead. A cloud environment reruns its setup script only when the script's text changes.
 
-The network secret keeps the serve token outside the VM. The session sees only a placeholder in `CODEX_TOKEN_BEARER`, which the scripts send as the bearer, and Claude Code swaps in the token once the request leaves the session. A request without the variable carries nothing to swap, so the worker answers 401. The swap never reaches setup-script requests, so the token fetch runs at session start through the plugin's SessionStart hook. A session reads its environment when it starts, so a session older than the secret keeps failing until you start a new one.
+The network secret keeps the serve token outside the VM. Claude Code puts the token in the `Authorization` header of every request to the worker's host once the request leaves the session, so the session holds at most the placeholder in `CODEX_TOKEN_BEARER`, which the scripts send as the bearer when it is set. The swap never reaches setup-script requests, so the token fetch runs at session start through the plugin's SessionStart hook. A session reads its environment when it starts, so a session older than the secret keeps failing until you start a new one.
 
 ## Development
 
