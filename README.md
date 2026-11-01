@@ -101,11 +101,16 @@ The network secret keeps the serve token outside the VM. Claude Code puts the to
 
 ## Development
 
+The scripts and the token worker are TypeScript that Bun runs as written, with no build step. The repository follows the fleet standard of the [fgilio plugin marketplace](https://github.com/fgilio/claude-plugins/blob/main/fleet/README.md): oxfmt, type-aware oxlint, `tsc`, markdownlint and `bun test`, with the same gates in CI.
+
 ```bash
-bun test
+bun install      # the tools at the versions bun.lock pins, and the pre-commit hook
+bun run check    # format, lint, type check, Markdown lint, and every test
 ```
 
-The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint.
+`bun install` installs a lefthook pre-commit hook. On the staged files it runs `oxlint --fix` and oxfmt on TypeScript, oxfmt on JSON, Markdown and YAML, and markdownlint on Markdown, and it adds their fixes to the commit. A lint error the fixer cannot fix stops the commit. Never bypass it with `--no-verify`. The prose rules run in CI from the marketplace's `check-prose.ts`.
+
+The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint, and the seed and status scripts run against a fake `wrangler` and a local server. To check the worker bundle without deploying it, run `wrangler deploy --dry-run --outdir <dir>` in `token-worker`.
 
 ## License
 
