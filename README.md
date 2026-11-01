@@ -24,7 +24,7 @@ Each partner is a Codex session resumed with `codex exec resume`, so it holds th
 
 ## Installation
 
-```
+```text
 /plugin marketplace add fgilio/claude-plugins
 /plugin install codex-partner@fgilio
 ```
@@ -50,7 +50,7 @@ A cloud session has no browser for `codex login`, and a ChatGPT login copied int
 
 Codex refreshes a token only in its last 5 minutes. The scripts fetch a new one once less than an hour is left, and the worker never serves a token closer to expiry than that, so a cloud VM never refreshes on its own.
 
-```
+```text
 claude.ai cloud session                     Cloudflare
 ├─ SessionStart hook / each script ──GET──▶ token worker (codex-token)
 │  (network secret swaps in the serve token)├─ cron every 6 h: refresh when < 36 h left
