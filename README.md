@@ -61,14 +61,17 @@ claude.ai cloud session                     Cloudflare
 ### 1. Deploy the worker
 
 ```bash
+bun install                                    # the wrangler that bun.lock pins
 cd token-worker
 export CLOUDFLARE_ACCOUNT_ID=<account id>
-wrangler kv namespace create CODEX_AUTH        # put the id in wrangler.jsonc
-wrangler deploy
+bun run wrangler kv namespace create CODEX_AUTH  # put the id in wrangler.jsonc
+bun run wrangler deploy
 openssl rand -hex 32                           # the serve token: keep it for step 3
-wrangler secret put SERVE_TOKEN                # paste the serve token at the prompt
+bun run wrangler secret put SERVE_TOKEN        # paste the serve token at the prompt
 bun scripts/seed.ts                            # signs in to ChatGPT in the browser
 ```
+
+`bun run wrangler` runs the wrangler that `package.json` pins, and `seed.ts` calls the same one.
 
 `seed.ts` signs in with `codex login` in a temporary Codex home, so the worker owns a login that no other machine refreshes, then seals it under a new `BUNDLE_KEY` secret.
 
@@ -110,7 +113,7 @@ bun run check    # format, lint, type check, Markdown lint, and every test
 
 `bun install` installs a lefthook pre-commit hook. On the staged files it runs `oxlint --fix` and oxfmt on TypeScript, oxfmt on JSON, Markdown and YAML, and markdownlint on Markdown, and it adds their fixes to the commit. A lint error the fixer cannot fix stops the commit. Never bypass it with `--no-verify`. The prose rules run in CI from the marketplace's `check-prose.ts`.
 
-The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint, and the seed and status scripts run against a fake `wrangler` and a local server. To check the worker bundle without deploying it, run `wrangler deploy --dry-run --outdir <dir>` in `token-worker`.
+The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint, and the seed and status scripts run against a fake `wrangler` and a local server. To check the worker bundle without deploying it, run `bun run wrangler deploy --dry-run --outdir <dir>` in `token-worker`.
 
 ## License
 

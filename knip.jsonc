@@ -9,6 +9,10 @@
     "token-worker/scripts/*.ts",
     "test/fixtures/fake-*.ts",
   ],
+  // lefthook runs from its own install script, which writes the git hooks.
+  // wrangler runs from the README commands and from seed.ts by its path in
+  // node_modules/.bin, so no file imports either.
+  "ignoreDependencies": ["lefthook", "wrangler"],
   // The Codex CLI is a Node program the user installs with npm.
   "ignoreBinaries": ["codex"],
 }

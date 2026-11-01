@@ -19,6 +19,7 @@ import { rejectionMessage } from "../../test/fixtures/rejection";
 import { openBundle } from "../src/bundle";
 import { BUNDLE_KV_KEY, STATUS_KV_KEY } from "../src/index";
 import {
+  PINNED_WRANGLER,
   WORKER_DIRECTORY,
   assertDedicatedLogin,
   commandRunner,
@@ -118,6 +119,7 @@ async function runScript(
         HOME: root,
         CODEX_HOME: join(root, "codex-home"),
         FAKE_WRANGLER_LOG: wranglerLog,
+        CODEX_TOKEN_WRANGLER: join(binDirectory, "wrangler"),
         ...env,
       },
       stdin: new Blob([""]),
@@ -236,7 +238,7 @@ describe("seed: storeInWorker", () => {
 
     expect(calls).toHaveLength(3);
     expect(bundle).toEqual({
-      command: "wrangler",
+      command: PINNED_WRANGLER,
       args: [
         "kv",
         "key",
@@ -249,13 +251,13 @@ describe("seed: storeInWorker", () => {
         sealedPath,
       ],
     });
-    expect(secret?.command).toBe("wrangler");
+    expect(secret?.command).toBe(PINNED_WRANGLER);
     expect(secret?.args).toEqual(["secret", "put", "BUNDLE_KEY"]);
     expect(
       await openBundle(readFileSync(sealedPath, "utf8"), secret?.input),
     ).toEqual(login);
     expect(status).toEqual({
-      command: "wrangler",
+      command: PINNED_WRANGLER,
       args: [
         "kv",
         "key",
@@ -342,12 +344,42 @@ describe("seed: commandRunner", () => {
     ).toThrow("wrangler kv key put failed: Authentication error [code: 10000]");
   });
 
+  test("names bun install when the pinned wrangler is missing", () => {
+    const run = commandRunner(root, fakeWranglerEnv());
+
+    expect(() =>
+      run(join(root, "node_modules", ".bin", "wrangler"), []),
+    ).toThrow(
+      /^Unable to find .*\/node_modules\/\.bin\/wrangler\. Run `bun install` at the repository root/,
+    );
+  });
+
   test("names a command that is not on PATH", () => {
     const run = commandRunner(root, { PATH: join(root, "empty") });
 
     expect(() => run("wrangler", ["whoami"])).toThrow(
       "Unable to find wrangler on PATH. Install it, then run this script again.",
     );
+  });
+});
+
+describe("the pinned wrangler", () => {
+  test("is the version package.json pins, installed by bun install", async () => {
+    const manifest: unknown = await Bun.file(
+      join(WORKER_DIRECTORY, "..", "package.json"),
+    ).json();
+    const devDependencies = isRecord(manifest)
+      ? manifest.devDependencies
+      : undefined;
+    const pinned = isRecord(devDependencies)
+      ? devDependencies.wrangler
+      : undefined;
+    const version = Bun.spawnSync([PINNED_WRANGLER, "--version"], {
+      env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
+    });
+
+    expect(pinned).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(version.stdout.toString().trim()).toBe(String(pinned));
   });
 });
 

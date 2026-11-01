@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import {
   PartnerError,
@@ -42,10 +42,21 @@ Signs in to ChatGPT with \`codex login\` in a temporary Codex home, seals the
 login with a new BUNDLE_KEY, and stores both in the worker. Pass --auth to
 store an existing dedicated login instead.
 
-Requires wrangler (logged in) and CLOUDFLARE_ACCOUNT_ID for the worker's account.
+Requires CLOUDFLARE_ACCOUNT_ID for the worker's account and a wrangler login.
+Runs the wrangler that bun.lock pins (run \`bun install\` first), or the one
+CODEX_TOKEN_WRANGLER names.
 `;
 
 export const WORKER_DIRECTORY = resolve(import.meta.dir, "..");
+
+/** The wrangler that `bun install` puts in the repository, at its pinned version. */
+export const PINNED_WRANGLER = resolve(
+  WORKER_DIRECTORY,
+  "..",
+  "node_modules",
+  ".bin",
+  "wrangler",
+);
 
 /** Runs one command to completion, or throws a PartnerError that names it. */
 export type CommandRunner = (
@@ -62,7 +73,9 @@ export interface SeedSummary {
 
 function missingCommand(command: string): PartnerError {
   return new PartnerError(
-    `Unable to find ${command} on PATH. Install it, then run this script again.`,
+    command.includes("/")
+      ? `Unable to find ${command}. Run \`bun install\` at the repository root, then run this script again.`
+      : `Unable to find ${command} on PATH. Install it, then run this script again.`,
   );
 }
 
@@ -91,7 +104,7 @@ export function commandRunner(
         `exit ${String(result.status)}`;
 
       throw new PartnerError(
-        `${command} ${args.slice(0, 3).join(" ")} failed: ${detail.trim()}`,
+        `${basename(command)} ${args.slice(0, 3).join(" ")} failed: ${detail.trim()}`,
       );
     }
   };
@@ -163,12 +176,14 @@ export async function storeInWorker({
   login,
   scratch,
   run,
+  wrangler = PINNED_WRANGLER,
   now = new Date(),
   bundleKey = generateBundleKey(),
 }: {
   login: StoredLogin;
   scratch: string;
   run: CommandRunner;
+  wrangler?: string;
   now?: Date;
   bundleKey?: string;
 }): Promise<SeedSummary> {
@@ -178,7 +193,7 @@ export async function storeInWorker({
     mode: 0o600,
   });
 
-  run("wrangler", [
+  run(wrangler, [
     "kv",
     "key",
     "put",
@@ -189,8 +204,8 @@ export async function storeInWorker({
     "--path",
     sealedPath,
   ]);
-  run("wrangler", ["secret", "put", "BUNDLE_KEY"], bundleKey);
-  run("wrangler", [
+  run(wrangler, ["secret", "put", "BUNDLE_KEY"], bundleKey);
+  run(wrangler, [
     "kv",
     "key",
     "put",
@@ -269,7 +284,14 @@ if (import.meta.main) {
 
       assertDedicatedLogin(loginPath, join(codexHome(), "auth.json"));
 
-      printJson(await storeInWorker({ login, scratch, run: commandRunner() }));
+      printJson(
+        await storeInWorker({
+          login,
+          scratch,
+          run: commandRunner(),
+          wrangler: process.env.CODEX_TOKEN_WRANGLER || PINNED_WRANGLER,
+        }),
+      );
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
