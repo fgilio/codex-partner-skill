@@ -12,7 +12,8 @@ const threadId =
   resumeIndex === -1
     ? (process.env.FAKE_CODEX_THREAD_ID ?? "thread-new")
     : args[resumeIndex + 1];
-const replyPath = args[args.indexOf("--output-last-message") + 1];
+const replyFlag = args.indexOf("--output-last-message");
+const replyPath = replyFlag === -1 ? undefined : args[replyFlag + 1];
 
 if (process.env.FAKE_CODEX_LOG) {
   appendFileSync(

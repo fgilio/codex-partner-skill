@@ -253,6 +253,26 @@ afterEach(() => {
   rmSync(sandbox.root, { recursive: true, force: true });
 });
 
+describe("the fake codex", () => {
+  test("fails without --output-last-message, so a script that drops it fails too", () => {
+    const run = Bun.spawnSync(
+      [
+        process.execPath,
+        join(import.meta.dir, "fixtures", "fake-codex.ts"),
+        "exec",
+        "-",
+      ],
+      { cwd: sandbox.root, stdin: new TextEncoder().encode("Hi") },
+    );
+
+    expect(run.exitCode).toBe(1);
+    expect(run.stderr.toString()).toContain(
+      "fake codex: --output-last-message is missing",
+    );
+    expect(existsSync(join(sandbox.root, "exec"))).toBe(false);
+  });
+});
+
 describe("codex-partner-ask", () => {
   test("sends the prompt on stdin to a read-only, ephemeral session at low effort", async () => {
     const result = await runScript("codex-partner-ask.ts", [
