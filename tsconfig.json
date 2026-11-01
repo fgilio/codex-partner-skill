@@ -10,6 +10,15 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["**/*.ts", "**/*.mts", "**/*.js", "**/*.mjs", "**/*.cjs"],
+  "include": [
+    "**/*.ts",
+    "**/*.mts",
+    "**/*.cts",
+    "**/*.tsx",
+    "**/*.js",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.jsx"
+  ],
   "exclude": ["node_modules", "**/.*/**"]
 }
