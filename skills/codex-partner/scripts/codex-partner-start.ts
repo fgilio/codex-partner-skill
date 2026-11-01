@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Starts a named Codex partner session in this repository and prints its first reply.
 
 import {
@@ -12,12 +12,12 @@ import {
   repositoryRoot,
   runCodexTurn,
   savePartner,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-start.mjs <name> [options] <prompt | ->
+const USAGE = `Usage: codex-partner-start.ts <name> [options] <prompt | ->
 
 Starts a Codex session that remembers the conversation. Continue it with
-codex-partner-say.mjs <name>. Names are scoped to the current repository.
+codex-partner-say.ts <name>. Names are scoped to the current repository.
 
 Options:
   --model <id>       Codex model (default: the Codex config)
@@ -29,7 +29,7 @@ Options:
 Pass - as the prompt to read it from stdin.
 `;
 
-main(async () => {
+await main(async () => {
   const { positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,

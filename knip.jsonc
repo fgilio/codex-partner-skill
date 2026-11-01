@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
+  // Claude Code runs each skill script directly, wrangler deploys the worker
+  // from src/index.ts, and the tests run each fake as an executable on PATH,
+  // so no file imports them.
+  "entry": [
+    "skills/codex-partner/scripts/codex-partner-*.ts",
+    "token-worker/src/index.ts",
+    "token-worker/scripts/*.ts",
+    "test/fixtures/fake-*.ts",
+  ],
+  // lefthook runs from its own install script, which writes the git hooks,
+  // so no file imports or calls it.
+  "ignoreDependencies": ["lefthook"],
+  // The Codex CLI is a Node program the user installs with npm.
+  "ignoreBinaries": ["codex"],
+}

@@ -30,21 +30,81 @@ const FETCH_BELOW_MS = 60 * 60 * 1000;
 
 export class PartnerError extends Error {}
 
-export async function main(run) {
+/** A saved partner, one entry of the sessions.json list. */
+export interface Partner {
+  name: string;
+  repository: string;
+  directory: string;
+  thread_id: string;
+  created_at: string;
+  last_used_at: string;
+}
+
+/** What a turn passes to Codex besides the prompt. */
+export interface TurnOptions {
+  model: string | undefined;
+  effort: string | undefined;
+  canWrite: boolean;
+  keepsMcpServers: boolean;
+}
+
+export interface CodexResult {
+  threadId: string | undefined;
+  reply: string;
+}
+
+/** A Codex login the token worker issued: ChatGPT, no refresh token. */
+interface WorkerLogin {
+  auth_mode: "chatgpt";
+  tokens: Record<string, unknown> & { refresh_token: "" };
+  [field: string]: unknown;
+}
+
+export type LoginReport =
+  | { source: "codex-login" }
+  | { source: "token-worker"; access_expires_at: string; fetched: boolean };
+
+interface CodexRun {
+  exitCode: number;
+  signal: NodeJS.Signals | null;
+  startedThreadId: string | undefined;
+  errorMessages: string[];
+  stderrLines: string[];
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A value for a message: a string as is, anything else as JSON. */
+export function asText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** The `code` of a Node system error, such as ENOENT. */
+export function errorCode(error: unknown): string | undefined {
+  return error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
+export async function main(run: () => Promise<void>): Promise<void> {
   try {
     await run();
   } catch (error) {
     const message =
       error instanceof PartnerError
         ? error.message
-        : `Unexpected failure: ${error?.stack ?? error}`;
+        : `Unexpected failure: ${error instanceof Error ? (error.stack ?? String(error)) : String(error)}`;
 
     process.stderr.write(`${message}\n`);
     process.exit(1);
   }
 }
 
-export function printJson(value) {
+export function printJson(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -52,7 +112,10 @@ export function printJson(value) {
  * Prints a Codex reply as plain text, after an optional header line,
  * or the whole result as JSON with --json.
  */
-export function printResult(result, { asJson, header }) {
+export function printResult(
+  result: { reply: string; [field: string]: unknown },
+  { asJson, header }: { asJson: boolean; header?: string },
+): void {
   if (asJson) {
     printJson(result);
 
@@ -66,21 +129,39 @@ export function printResult(result, { asJson, header }) {
   process.stdout.write(`${result.reply}\n`);
 }
 
+export interface ParsedArguments {
+  /** Each value option given, by name. */
+  values: Partial<Record<string, string>>;
+  /** Each boolean option given. */
+  switches: Set<string>;
+  positionals: string[];
+}
+
 /**
  * Parses `--flag value`, `--flag=value`, and boolean `--flag` arguments.
  *
  * Everything after `--` is positional, so a prompt that starts
- * with a dash survives as long as the caller separates it.
+ * with a dash survives as long as the caller separates it. Bun keeps
+ * a `--` for the script only when another argument comes before it.
  */
 export function parseArguments(
-  argv,
-  { usage, valueFlags = [], booleanFlags = [] },
-) {
-  const flags = {};
-  const positionals = [];
+  argv: string[],
+  {
+    usage,
+    valueFlags = [],
+    booleanFlags = [],
+  }: { usage: string; valueFlags?: string[]; booleanFlags?: string[] },
+): ParsedArguments {
+  const values: Partial<Record<string, string>> = {};
+  const switches = new Set<string>();
+  const positionals: string[] = [];
 
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
+
+    if (argument === undefined) {
+      break;
+    }
 
     if (argument === "--help" || argument === "-h") {
       process.stdout.write(usage);
@@ -106,7 +187,7 @@ export function parseArguments(
     }
 
     if (booleanFlags.includes(name)) {
-      flags[name] = true;
+      switches.add(name);
       continue;
     }
 
@@ -120,13 +201,13 @@ export function parseArguments(
       throw new PartnerError(`The --${name} option needs a value.\n\n${usage}`);
     }
 
-    flags[name] = value;
+    values[name] = value;
   }
 
-  return { flags, positionals };
+  return { values, switches, positionals };
 }
 
-function splitFlag(flag) {
+function splitFlag(flag: string): [string, string | undefined] {
   const boundary = flag.indexOf("=");
 
   return boundary === -1
@@ -135,30 +216,37 @@ function splitFlag(flag) {
 }
 
 export function parseTurnArguments(
-  argv,
-  usage,
-  { defaultEffort, valueFlags = [], allowsWrite = true } = {},
-) {
-  const { flags, positionals } = parseArguments(argv, {
+  argv: string[],
+  usage: string,
+  {
+    defaultEffort,
+    valueFlags = [],
+    allowsWrite = true,
+  }: {
+    defaultEffort?: string;
+    valueFlags?: string[];
+    allowsWrite?: boolean;
+  } = {},
+): ParsedArguments & { options: TurnOptions; asJson: boolean } {
+  const parsed = parseArguments(argv, {
     usage,
     valueFlags: ["model", "effort", ...valueFlags],
     booleanFlags: ["mcp", "json", ...(allowsWrite ? ["write"] : [])],
   });
 
   return {
-    flags,
-    positionals,
+    ...parsed,
     options: {
-      model: flags.model,
-      effort: flags.effort ?? defaultEffort,
-      canWrite: flags.write === true,
-      keepsMcpServers: flags.mcp === true,
+      model: parsed.values["model"],
+      effort: parsed.values["effort"] ?? defaultEffort,
+      canWrite: parsed.switches.has("write"),
+      keepsMcpServers: parsed.switches.has("mcp"),
     },
-    asJson: flags.json === true,
+    asJson: parsed.switches.has("json"),
   };
 }
 
-export function readPrompt(value, usage) {
+export function readPrompt(value: string | undefined, usage: string): string {
   if (value === undefined) {
     throw new PartnerError(`A prompt is required.\n\n${usage}`);
   }
@@ -174,7 +262,10 @@ export function readPrompt(value, usage) {
   return prompt;
 }
 
-export function assertPartnerName(name, usage) {
+export function assertPartnerName(
+  name: string | undefined,
+  usage: string,
+): asserts name is string {
   if (name === undefined) {
     throw new PartnerError(`A partner name is required.\n\n${usage}`);
   }
@@ -186,7 +277,7 @@ export function assertPartnerName(name, usage) {
   }
 }
 
-export function repositoryRoot() {
+export function repositoryRoot(): string {
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
     encoding: "utf8",
   });
@@ -194,22 +285,38 @@ export function repositoryRoot() {
   return result.status === 0 ? result.stdout.trim() : process.cwd();
 }
 
-function partnerHome() {
+function partnerHome(): string {
   return join(
     process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"),
     "codex-partner",
   );
 }
 
-export function codexHome() {
+export function codexHome(): string {
   return process.env.CODEX_HOME || join(homedir(), ".codex");
 }
 
-function partnersPath() {
+function partnersPath(): string {
   return join(partnerHome(), "sessions.json");
 }
 
-export function loadPartners() {
+const PARTNER_FIELDS = [
+  "name",
+  "repository",
+  "directory",
+  "thread_id",
+  "created_at",
+  "last_used_at",
+] as const;
+
+function isPartnerEntry(value: unknown): value is Partner {
+  return (
+    isRecord(value) &&
+    PARTNER_FIELDS.every((field) => typeof value[field] === "string")
+  );
+}
+
+export function loadPartners(): Partner[] {
   const path = partnersPath();
   const partners =
     readJsonIfPresent(
@@ -217,7 +324,7 @@ export function loadPartners() {
       "Move the file aside, then start the partner again.",
     ) ?? [];
 
-  if (!Array.isArray(partners)) {
+  if (!Array.isArray(partners) || !partners.every(isPartnerEntry)) {
     throw new PartnerError(
       `${path} does not hold a list of partners. Move the file aside, then start the partner again.`,
     );
@@ -230,22 +337,30 @@ export function loadPartners() {
  * Reloads the partner list just before each write, so only that
  * short window can lose a change saved by a concurrent call.
  */
-export function updatePartners(change) {
+export function updatePartners(change: (partners: Partner[]) => Partner[]) {
   writeJsonAtomically(partnersPath(), change(loadPartners()), 0o600);
 }
 
-export function isPartner(partner, repository, name) {
+export function isPartner(
+  partner: Partner,
+  repository: string,
+  name: string,
+): boolean {
   return partner.repository === repository && partner.name === name;
 }
 
-export function findPartner(partners, repository, name) {
+export function findPartner(
+  partners: Partner[],
+  repository: string,
+  name: string,
+): Partner | undefined {
   return partners.find((partner) => isPartner(partner, repository, name));
 }
 
-export function assertNewPartner(repository, name) {
+export function assertNewPartner(repository: string, name: string): void {
   if (findPartner(loadPartners(), repository, name)) {
     throw new PartnerError(
-      `A partner named "${name}" already exists in ${repository}. Continue it with codex-partner-say.mjs ${name}, or forget it first.`,
+      `A partner named "${name}" already exists in ${repository}. Continue it with codex-partner-say.ts ${name}, or forget it first.`,
     );
   }
 }
@@ -253,7 +368,17 @@ export function assertNewPartner(repository, name) {
 /**
  * Saves the Codex thread a turn started as a new partner.
  */
-export function savePartner({ name, repository, directory, threadId }) {
+export function savePartner({
+  name,
+  repository,
+  directory,
+  threadId,
+}: {
+  name: string;
+  repository: string;
+  directory: string;
+  threadId: string | undefined;
+}): void {
   if (!threadId) {
     throw new PartnerError(
       "Codex replied without reporting a thread id, so the partner cannot be continued.",
@@ -265,7 +390,7 @@ export function savePartner({ name, repository, directory, threadId }) {
   updatePartners((partners) => {
     if (findPartner(partners, repository, name)) {
       throw new PartnerError(
-        `A partner named "${name}" was saved in ${repository} while Codex answered. This reply is on Codex thread ${threadId}. Continue the saved partner with codex-partner-say.mjs ${name}, or forget it first.`,
+        `A partner named "${name}" was saved in ${repository} while Codex answered. This reply is on Codex thread ${threadId}. Continue the saved partner with codex-partner-say.ts ${name}, or forget it first.`,
       );
     }
 
@@ -287,7 +412,7 @@ export function savePartner({ name, repository, directory, threadId }) {
  * Lets one message at a time reach a partner. Codex appends every
  * turn to the same session file, so two resumes would interleave.
  */
-export function holdPartnerLock(threadId) {
+export function holdPartnerLock(threadId: string): void {
   const lockDirectory = join(partnerHome(), "locks");
   const lockPath = join(lockDirectory, `${threadId}.lock`);
 
@@ -303,7 +428,7 @@ export function holdPartnerLock(threadId) {
 
       return;
     } catch (error) {
-      if (error.code !== "EEXIST") {
+      if (errorCode(error) !== "EEXIST") {
         throw error;
       }
 
@@ -324,7 +449,7 @@ export function holdPartnerLock(threadId) {
   );
 }
 
-function isProcessAlive(pid) {
+function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
@@ -334,7 +459,7 @@ function isProcessAlive(pid) {
 
     return true;
   } catch (error) {
-    return error.code === "EPERM";
+    return errorCode(error) === "EPERM";
   }
 }
 
@@ -347,7 +472,13 @@ export function runCodexTurn({
   isEphemeral = false,
   options,
   directory,
-}) {
+}: {
+  prompt: string;
+  threadId?: string;
+  isEphemeral?: boolean;
+  options: TurnOptions;
+  directory: string;
+}): Promise<CodexResult> {
   return runCodexExec({
     // "-" reads the prompt from stdin, clear of argv length limits.
     command: threadId ? ["resume", threadId, "-"] : ["-"],
@@ -371,10 +502,17 @@ export function runCodexReview({
   isEphemeral,
   options,
   directory,
-}) {
+}: {
+  target: string[];
+  instructions?: string | undefined;
+  isEphemeral: boolean;
+  options: TurnOptions;
+  directory: string;
+}): Promise<CodexResult> {
   return runCodexExec({
     command: ["review", ...target],
     stdin: instructions,
+    threadId: undefined,
     isEphemeral,
     options: { ...options, canWrite: false },
     directory,
@@ -388,7 +526,14 @@ async function runCodexExec({
   isEphemeral,
   options,
   directory,
-}) {
+}: {
+  command: string[];
+  stdin: string;
+  threadId: string | undefined;
+  isEphemeral: boolean;
+  options: TurnOptions;
+  directory: string;
+}): Promise<CodexResult> {
   ensureCodexLogin();
 
   const scratch = mkdtempSync(join(tmpdir(), "codex-partner-"));
@@ -428,47 +573,69 @@ async function runCodexExec({
   }
 }
 
-function spawnCodex(codexArguments, stdin, directory) {
+function spawnCodex(
+  codexArguments: string[],
+  stdin: string,
+  directory: string,
+): Promise<CodexRun> {
   return new Promise((resolve, reject) => {
     const child = spawn("codex", codexArguments, { cwd: directory });
-    const stderrLines = [];
-    const errorMessages = [];
-    let startedThreadId;
+    const stderrLines: string[] = [];
+    const errorMessages: string[] = [];
+    let startedThreadId: string | undefined;
     let pendingStdout = "";
 
-    const forwardSignal = (signal) => child.kill(signal);
+    const forwardSignal = (signal: NodeJS.Signals) => child.kill(signal);
     process.on("SIGINT", forwardSignal);
     process.on("SIGTERM", forwardSignal);
 
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
+    child.stdout.on("data", (chunk: string) => {
       const lines = (pendingStdout + chunk).split("\n");
-      pendingStdout = lines.pop();
+      pendingStdout = lines.pop() ?? "";
 
       for (const line of lines) {
         const event = parseJsonOrNull(line);
 
-        if (event?.type === "thread.started") {
+        if (!isRecord(event)) {
+          continue;
+        }
+
+        if (
+          event.type === "thread.started" &&
+          typeof event.thread_id === "string"
+        ) {
           startedThreadId = event.thread_id;
         }
 
-        if (event?.type === "error" && event.message) {
+        if (
+          event.type === "error" &&
+          typeof event.message === "string" &&
+          event.message
+        ) {
           errorMessages.push(event.message);
         }
 
-        if (event?.type === "turn.failed" && event.error?.message) {
+        if (
+          event.type === "turn.failed" &&
+          isRecord(event.error) &&
+          typeof event.error.message === "string" &&
+          event.error.message
+        ) {
           errorMessages.push(event.error.message);
         }
       }
     });
 
     child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) =>
+    child.stderr.on("data", (chunk: string) =>
       stderrLines.push(...chunk.split("\n").filter(Boolean)),
     );
 
     child.on("error", (error) =>
-      reject(error.code === "ENOENT" ? new PartnerError(CODEX_MISSING) : error),
+      reject(
+        errorCode(error) === "ENOENT" ? new PartnerError(CODEX_MISSING) : error,
+      ),
     );
     child.on("close", (exitCode, signal) => {
       process.off("SIGINT", forwardSignal);
@@ -483,12 +650,12 @@ function spawnCodex(codexArguments, stdin, directory) {
     });
 
     // Codex can exit before it reads stdin. The close handler reports that.
-    child.stdin.on("error", () => {});
+    child.stdin.on("error", () => undefined);
     child.stdin.end(stdin);
   });
 }
 
-function parseJsonOrNull(text) {
+function parseJsonOrNull(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -496,7 +663,10 @@ function parseJsonOrNull(text) {
   }
 }
 
-function describeCodexFailure(run, threadId) {
+function describeCodexFailure(
+  run: CodexRun,
+  threadId: string | undefined,
+): string {
   const detail = (
     run.errorMessages.at(-1) ?? run.stderrLines.slice(-5).join("\n")
   )
@@ -519,7 +689,7 @@ function describeCodexFailure(run, threadId) {
  * on every dot, so a quoted name such as "a.b" stays enabled. An
  * `mcp_servers={}` override merges into the table and changes nothing.
  */
-function mcpServerOverrides() {
+function mcpServerOverrides(): string[] {
   const configPath = join(codexHome(), "config.toml");
 
   if (!existsSync(configPath)) {
@@ -531,7 +701,7 @@ function mcpServerOverrides() {
       ...readFileSync(configPath, "utf8").matchAll(
         /^\[mcp_servers\.([A-Za-z0-9_-]+)[\].]/gm,
       ),
-    ].map((match) => match[1]),
+    ].flatMap((match) => (match[1] === undefined ? [] : [match[1]])),
   );
 
   return [...serverNames].flatMap((name) => [
@@ -546,7 +716,7 @@ function mcpServerOverrides() {
  * A login with a refresh token belongs to `codex login` and is
  * never replaced.
  */
-export function ensureCodexLogin() {
+export function ensureCodexLogin(): LoginReport {
   const tokenUrl = process.env.CODEX_TOKEN_URL;
 
   if (!tokenUrl) {
@@ -563,33 +733,46 @@ export function ensureCodexLogin() {
     return { source: "codex-login" };
   }
 
-  const currentExpiry = accessTokenExpiryMs(currentLogin?.tokens.access_token);
-  const needsFetch =
-    !currentExpiry || currentExpiry - Date.now() <= FETCH_BELOW_MS;
-  const login = needsFetch ? fetchWorkerLogin(tokenUrl) : currentLogin;
+  const currentExpiry = isWorkerIssued(currentLogin)
+    ? accessTokenExpiryMs(currentLogin.tokens.access_token)
+    : null;
 
-  if (needsFetch) {
-    writeJsonAtomically(loginPath, login, 0o600);
+  if (currentExpiry && currentExpiry - Date.now() > FETCH_BELOW_MS) {
+    return {
+      source: "token-worker",
+      access_expires_at: new Date(currentExpiry).toISOString(),
+      fetched: false,
+    };
   }
+
+  const { login, expiresAt } = fetchWorkerLogin(tokenUrl);
+
+  writeJsonAtomically(loginPath, login, 0o600);
 
   return {
     source: "token-worker",
-    access_expires_at: new Date(
-      accessTokenExpiryMs(login.tokens.access_token),
-    ).toISOString(),
-    fetched: needsFetch,
+    access_expires_at: new Date(expiresAt).toISOString(),
+    fetched: true,
   };
 }
 
 // The worker issues its logins with an empty refresh token.
-function isWorkerIssued(login) {
-  return login.auth_mode === "chatgpt" && login.tokens?.refresh_token === "";
+function isWorkerIssued(login: unknown): login is WorkerLogin {
+  return (
+    isRecord(login) &&
+    login.auth_mode === "chatgpt" &&
+    isRecord(login.tokens) &&
+    login.tokens.refresh_token === ""
+  );
 }
 
 /**
  * Fetches with curl, which honors the cloud VM's HTTPS proxy and CA store.
  */
-function fetchWorkerLogin(tokenUrl) {
+function fetchWorkerLogin(tokenUrl: string): {
+  login: WorkerLogin;
+  expiresAt: number;
+} {
   const host = hostOf(tokenUrl);
   const headers = ["Accept: application/json"];
 
@@ -614,7 +797,7 @@ function fetchWorkerLogin(tokenUrl) {
     { input: headers.join("\n"), encoding: "utf8" },
   );
 
-  if (result.error?.code === "ENOENT") {
+  if (errorCode(result.error) === "ENOENT") {
     throw new PartnerError(
       "Unable to find curl on PATH. Install curl, then try again.",
     );
@@ -622,7 +805,7 @@ function fetchWorkerLogin(tokenUrl) {
 
   if (result.status !== 0) {
     throw new PartnerError(
-      `Unable to reach the token worker at ${host}: ${result.stderr.trim() || `curl exit ${result.status}`}.`,
+      `Unable to reach the token worker at ${host}: ${result.stderr.trim() || `curl exit ${String(result.status)}`}.`,
     );
   }
 
@@ -639,24 +822,27 @@ function fetchWorkerLogin(tokenUrl) {
   }
 
   if (status !== 200) {
+    const message = isRecord(body) ? body.error : undefined;
+
     throw new PartnerError(
-      `The token worker at ${host} answered ${status}: ${body?.error ?? "no error message."}`,
+      `The token worker at ${host} answered ${status}: ${message === undefined || message === null ? "no error message." : asText(message)}`,
     );
   }
 
-  if (
-    !isWorkerIssued(body ?? {}) ||
-    !accessTokenExpiryMs(body.tokens.access_token)
-  ) {
+  const expiresAt = isWorkerIssued(body)
+    ? accessTokenExpiryMs(body.tokens.access_token)
+    : null;
+
+  if (!isWorkerIssued(body) || !expiresAt) {
     throw new PartnerError(
       `The token worker at ${host} returned a response that is not a Codex login.`,
     );
   }
 
-  return body;
+  return { login: body, expiresAt };
 }
 
-function hostOf(url) {
+function hostOf(url: string): string {
   try {
     return new URL(url).host;
   } catch {
@@ -666,7 +852,7 @@ function hostOf(url) {
   }
 }
 
-function accessTokenExpiryMs(accessToken) {
+function accessTokenExpiryMs(accessToken: unknown): number | null {
   const payload =
     typeof accessToken === "string" ? accessToken.split(".")[1] : undefined;
 
@@ -674,18 +860,15 @@ function accessTokenExpiryMs(accessToken) {
     return null;
   }
 
-  try {
-    const { exp } = JSON.parse(
-      Buffer.from(payload, "base64url").toString("utf8"),
-    );
+  const claims = parseJsonOrNull(
+    Buffer.from(payload, "base64url").toString("utf8"),
+  );
+  const exp = isRecord(claims) ? claims.exp : undefined;
 
-    return Number.isFinite(exp) ? exp * 1000 : null;
-  } catch {
-    return null;
-  }
+  return typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null;
 }
 
-function readJsonIfPresent(path, fix) {
+function readJsonIfPresent(path: string, fix: string): unknown {
   if (!existsSync(path)) {
     return null;
   }
@@ -697,7 +880,7 @@ function readJsonIfPresent(path, fix) {
   }
 }
 
-function writeJsonAtomically(path, value, mode) {
+function writeJsonAtomically(path: string, value: unknown, mode: number) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
   const temporaryPath = `${path}.${process.pid}.tmp`;

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Asks Codex one question in a throwaway session and prints the reply.
 
 import {
@@ -8,9 +8,9 @@ import {
   printResult,
   readPrompt,
   runCodexTurn,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-ask.mjs [options] <prompt | ->
+const USAGE = `Usage: codex-partner-ask.ts [options] <prompt | ->
 
 Asks Codex one question. Codex keeps no session, so a follow-up needs a partner.
 
@@ -24,7 +24,7 @@ Options:
 Pass - as the prompt to read it from stdin.
 `;
 
-main(async () => {
+await main(async () => {
   const { positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,

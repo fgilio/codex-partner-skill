@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Forgets a named Codex partner of this repository.
 
 import {
@@ -12,15 +12,15 @@ import {
   printJson,
   repositoryRoot,
   updatePartners,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-forget.mjs <name>
+const USAGE = `Usage: codex-partner-forget.ts <name>
 
 Removes the partner from this repository's list, so the name can start a new
 conversation. The Codex session file stays in the Codex home.
 `;
 
-main(async () => {
+await main(async () => {
   const { positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
   });
@@ -30,7 +30,7 @@ main(async () => {
 
   if (extra.length > 0) {
     throw new PartnerError(
-      `codex-partner-forget.mjs takes one name.\n\n${USAGE}`,
+      `codex-partner-forget.ts takes one name.\n\n${USAGE}`,
     );
   }
 
@@ -39,7 +39,7 @@ main(async () => {
 
   if (!partner) {
     throw new PartnerError(
-      `No partner named "${name}" exists in ${repository}. List them with codex-partner-list.mjs.`,
+      `No partner named "${name}" exists in ${repository}. List them with codex-partner-list.ts.`,
     );
   }
 

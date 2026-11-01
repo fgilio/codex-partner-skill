@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Reports where Codex gets its login, and fetches a token-worker login when CODEX_TOKEN_URL is set.
 
 import {
@@ -7,9 +7,9 @@ import {
   main,
   parseArguments,
   printJson,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-auth.mjs [--quiet]
+const USAGE = `Usage: codex-partner-auth.ts [--quiet]
 
 Without CODEX_TOKEN_URL, Codex uses its own login and nothing changes.
 With CODEX_TOKEN_URL, fetches a short-lived access token from the token worker
@@ -20,19 +20,19 @@ Options:
   --quiet   Print nothing on success and always exit 0 (for SessionStart hooks)
 `;
 
-main(async () => {
-  const { flags, positionals } = parseArguments(process.argv.slice(2), {
+await main(async () => {
+  const { switches, positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
     booleanFlags: ["quiet"],
   });
 
   if (positionals.length > 0) {
     throw new PartnerError(
-      `codex-partner-auth.mjs takes no arguments.\n\n${USAGE}`,
+      `codex-partner-auth.ts takes no arguments.\n\n${USAGE}`,
     );
   }
 
-  if (!flags.quiet) {
+  if (!switches.has("quiet")) {
     printJson(ensureCodexLogin());
 
     return;
@@ -41,6 +41,8 @@ main(async () => {
   try {
     ensureCodexLogin();
   } catch (error) {
-    process.stderr.write(`codex-partner: ${error.message}\n`);
+    process.stderr.write(
+      `codex-partner: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
   }
 });

@@ -1,11 +1,14 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Runs Codex's built-in code review on this repository and prints the findings.
 
 import { spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
+
 import {
   PartnerError,
   assertNewPartner,
   assertPartnerName,
+  errorCode,
   main,
   parseTurnArguments,
   printResult,
@@ -13,9 +16,9 @@ import {
   repositoryRoot,
   runCodexReview,
   savePartner,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-review.mjs [options] [instructions | -]
+const USAGE = `Usage: codex-partner-review.ts [options] [instructions | -]
 
 Runs Codex's code review, read-only. With no target and no instructions, it
 reviews the uncommitted changes, or the current branch against the default
@@ -24,7 +27,7 @@ branch when the working tree is clean.
 Options:
   --base <branch>    Review the changes against this branch
   --commit <sha>     Review the changes of one commit
-  --as <name>        Keep the review as a partner, to continue with codex-partner-say.mjs <name>
+  --as <name>        Keep the review as a partner, to continue with codex-partner-say.ts <name>
   --model <id>       Codex model (default: the Codex config)
   --effort <level>   Reasoning effort (default: the Codex config)
   --mcp              Keep the MCP servers from the Codex config switched on
@@ -35,12 +38,18 @@ Instructions replace the target: Codex reviews what they describe, such as
 them from stdin.
 `;
 
-main(async () => {
-  const { flags, positionals, options, asJson } = parseTurnArguments(
+interface ReviewTarget {
+  label: string;
+  arguments: string[];
+}
+
+await main(async () => {
+  const { values, positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,
     { valueFlags: ["base", "commit", "as"], allowsWrite: false },
   );
+  const { base, commit, as: name } = values;
 
   if (positionals.length > 1) {
     throw new PartnerError(
@@ -48,22 +57,18 @@ main(async () => {
     );
   }
 
-  if (flags.base !== undefined && flags.commit !== undefined) {
+  if (base !== undefined && commit !== undefined) {
     throw new PartnerError(`Pass --base or --commit, not both.\n\n${USAGE}`);
   }
 
   const hasInstructions = positionals.length === 1;
 
-  if (
-    hasInstructions &&
-    (flags.base !== undefined || flags.commit !== undefined)
-  ) {
+  if (hasInstructions && (base !== undefined || commit !== undefined)) {
     throw new PartnerError(
       'Codex reviews a target (--base or --commit) or follows instructions, not both. Name the target in the instructions instead, such as "Review the changes against main. Focus on the retry logic."',
     );
   }
 
-  const name = flags.as;
   const directory = process.cwd();
   const repository = repositoryRoot();
 
@@ -75,9 +80,9 @@ main(async () => {
   const instructions = hasInstructions
     ? readPrompt(positionals[0], USAGE)
     : undefined;
-  const target = hasInstructions
+  const target: ReviewTarget = hasInstructions
     ? { label: "custom instructions", arguments: ["-"] }
-    : resolveTarget(flags);
+    : resolveTarget(base, commit);
 
   const review = await runCodexReview({
     target: target.arguments,
@@ -101,7 +106,10 @@ main(async () => {
   );
 });
 
-function resolveTarget({ base, commit }) {
+function resolveTarget(
+  base: string | undefined,
+  commit: string | undefined,
+): ReviewTarget {
   if (git("rev-parse", "--is-inside-work-tree").stdout.trim() !== "true") {
     throw new PartnerError(
       `${process.cwd()} is not inside a git repository, so there are no changes to review. Run the review from the repository, or pass instructions that describe what to review.`,
@@ -153,7 +161,7 @@ function resolveTarget({ base, commit }) {
 // origin/HEAD names the branch pull requests merge into. A clone without
 // it, or with one that points at a deleted branch, falls back to the usual
 // default branch names.
-function findDefaultBranch() {
+function findDefaultBranch(): string {
   const remoteHead = git(
     "symbolic-ref",
     "--quiet",
@@ -177,7 +185,7 @@ function findDefaultBranch() {
   return defaultBranch;
 }
 
-function isCommit(ref) {
+function isCommit(ref: string): boolean {
   return (
     git(
       "rev-parse",
@@ -189,10 +197,10 @@ function isCommit(ref) {
   );
 }
 
-function git(...args) {
+function git(...args: string[]): SpawnSyncReturns<string> {
   const result = spawnSync("git", args, { encoding: "utf8" });
 
-  if (result.error?.code === "ENOENT") {
+  if (errorCode(result.error) === "ENOENT") {
     throw new PartnerError(
       "Unable to find git on PATH. Install git, then try again.",
     );

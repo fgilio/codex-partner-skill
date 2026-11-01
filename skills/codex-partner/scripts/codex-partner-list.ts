@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Lists the Codex partners of this repository, most recently used first.
 
 import {
@@ -8,9 +8,9 @@ import {
   parseArguments,
   printJson,
   repositoryRoot,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-list.mjs [--all]
+const USAGE = `Usage: codex-partner-list.ts [--all]
 
 Lists the partners of the current repository as JSON, most recently used first.
 
@@ -18,22 +18,24 @@ Options:
   --all   List the partners of every repository
 `;
 
-main(async () => {
-  const { flags, positionals } = parseArguments(process.argv.slice(2), {
+await main(async () => {
+  const { switches, positionals } = parseArguments(process.argv.slice(2), {
     usage: USAGE,
     booleanFlags: ["all"],
   });
 
   if (positionals.length > 0) {
     throw new PartnerError(
-      `codex-partner-list.mjs takes no arguments.\n\n${USAGE}`,
+      `codex-partner-list.ts takes no arguments.\n\n${USAGE}`,
     );
   }
 
   const repository = repositoryRoot();
   const partners = loadPartners()
-    .filter((partner) => flags.all || partner.repository === repository)
-    .sort((a, b) => b.last_used_at.localeCompare(a.last_used_at));
+    .filter(
+      (partner) => switches.has("all") || partner.repository === repository,
+    )
+    .toSorted((a, b) => b.last_used_at.localeCompare(a.last_used_at));
 
   printJson(partners);
 });
