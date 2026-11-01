@@ -59,7 +59,7 @@ ${CLAUDE_SKILL_DIR}/scripts/codex-partner-forget.ts invoice-export # frees the n
 ${CLAUDE_SKILL_DIR}/scripts/codex-partner-auth.ts                  # where Codex gets its login
 ```
 
-A message longer than one line, or one that holds quotes, backticks, or `$`, goes on stdin: pass `-` as the prompt and a quoted heredoc (`<<'EOF'`).
+A message longer than one line, one that holds quotes, backticks, or `$`, or one that starts with a dash goes on stdin: pass `-` as the prompt and a quoted heredoc (`<<'EOF'`). Bun keeps a `--` for the script only when another argument comes before it, so `-- --prompt` alone reads as an option.
 
 Options for ask, start, and say:
 

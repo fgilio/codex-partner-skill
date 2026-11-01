@@ -412,6 +412,28 @@ describe("codex-partner-ask", () => {
     expectSuccess(result);
     expect(codexCall(0).stdin).toBe("--not-a-flag");
   });
+
+  test("takes a prompt that starts with a dash on stdin", async () => {
+    const result = await runScript("codex-partner-ask.ts", ["-"], {
+      input: "--not-a-flag",
+    });
+
+    expectSuccess(result);
+    expect(codexCall(0).stdin).toBe("--not-a-flag");
+  });
+
+  // Pins the Bun behavior SKILL.md documents, so a Bun release that keeps
+  // the leading `--` shows up here.
+  test("reads a lone leading -- as Bun's own separator", async () => {
+    const result = await runScript("codex-partner-ask.ts", [
+      "--",
+      "--not-a-flag",
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.error).toMatch(/Unknown option --not-a-flag/);
+    expect(codexCalls()).toEqual([]);
+  });
 });
 
 describe("partners", () => {
