@@ -540,6 +540,38 @@ describe("status", () => {
     expect(result.stdout).toBe('{\n  "last_error": null\n}\n');
   });
 
+  test("refuses a 200 whose body is not the worker's JSON", async () => {
+    const page = `<!doctype html><title>Sign in</title>${"x".repeat(100)}`;
+    respond = () =>
+      new Response(page, { headers: { "Content-Type": "text/html" } });
+
+    const message = await rejectionMessage(
+      fetchStatus({ CODEX_TOKEN_URL: tokenUrl, CODEX_TOKEN_BEARER: "secret" }),
+    );
+
+    expect(message).toBe(
+      `${new URL("/status", tokenUrl).href} answered 200 with a body that is not the worker's JSON status: ${JSON.stringify(page.slice(0, 80))}. Check that CODEX_TOKEN_URL points at the token worker.`,
+    );
+  });
+
+  test("status.ts exits 1 on a 200 that is not JSON, and 0 on one that is", async () => {
+    const env = { CODEX_TOKEN_URL: tokenUrl, CODEX_TOKEN_BEARER: "secret" };
+
+    respond = () => new Response("Proxy says hello");
+    const proxied = await runScript("status.ts", [], env);
+
+    respond = () => Response.json({ last_error: null });
+    const healthy = await runScript("status.ts", [], env);
+
+    expect(proxied.status).toBe(1);
+    expect(proxied.stdout).toBe("");
+    expect(proxied.error).toMatch(
+      /\/status answered 200 with a body that is not the worker's JSON status: "Proxy says hello"/,
+    );
+    expect(healthy.status).toBe(0);
+    expect(healthy.stdout).toBe('{\n  "last_error": null\n}\n');
+  });
+
   test("status.ts exits 1 with the fix when a variable is missing", async () => {
     const result = await runScript("status.ts", [], {
       CODEX_TOKEN_BEARER: "serve-secret",

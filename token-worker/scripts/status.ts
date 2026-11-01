@@ -20,7 +20,7 @@ export type Fetcher = (url: URL, init: RequestInit) => Promise<Response>;
 export async function fetchStatus(
   env: Partial<Record<string, string>>,
   fetcher: Fetcher = fetch,
-): Promise<unknown> {
+): Promise<Record<string, unknown>> {
   const { CODEX_TOKEN_URL: tokenUrl, CODEX_TOKEN_BEARER: bearer } = env;
 
   if (!tokenUrl) {
@@ -35,10 +35,12 @@ export async function fetchStatus(
     );
   }
 
-  const response = await fetcher(new URL("/status", tokenUrl), {
+  const statusUrl = new URL("/status", tokenUrl);
+  const response = await fetcher(statusUrl, {
     headers: { Authorization: `Bearer ${bearer}` },
   });
-  const body: unknown = await response.json().catch(() => null);
+  const text = await response.text();
+  const body = parseJsonOrNull(text);
 
   if (!response.ok) {
     const message = isRecord(body) ? body.error : undefined;
@@ -48,7 +50,22 @@ export async function fetchStatus(
     );
   }
 
+  // A proxy or a sign-in page in front of the worker answers 200 too.
+  if (!isRecord(body)) {
+    throw new PartnerError(
+      `${statusUrl.href} answered ${response.status} with a body that is not the worker's JSON status: ${JSON.stringify(text.slice(0, 80))}. Check that CODEX_TOKEN_URL points at the token worker.`,
+    );
+  }
+
   return body;
+}
+
+function parseJsonOrNull(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 if (import.meta.main) {
