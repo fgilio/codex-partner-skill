@@ -4,13 +4,14 @@
   "type": "module",
   "packageManager": "bun@1.4.4",
   "scripts": {
-    "check": "bun run fmt:check && bun run lint && bun run typecheck && bun run lint:md && bun test",
+    "check": "bun run fmt:check && bun run lint && bun run typecheck && bun run lint:md && bun run test",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --type-aware --deny-warnings .",
     "lint:fix": "oxlint --type-aware --deny-warnings --fix .",
     "typecheck": "tsc --noEmit",
     "lint:md": "markdownlint-cli2",
+    "test": "bun test",
     "knip": "knip"
   },
   "trustedDependencies": [

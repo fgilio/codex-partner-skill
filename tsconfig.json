@@ -11,5 +11,5 @@
     "checkJs": true
   },
   "include": ["**/*.ts", "**/*.mts", "**/*.js", "**/*.mjs", "**/*.cjs"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "**/.*/**"]
 }
