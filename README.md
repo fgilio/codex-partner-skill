@@ -5,21 +5,21 @@ Talk with [OpenAI Codex](https://github.com/openai/codex) from Claude Code. Ask 
 Everything Claude follows lives in [SKILL.md](skills/codex-partner/SKILL.md).
 
 ```bash
-codex-partner-ask.mjs "Does the retry loop stop after five attempts?"
-codex-partner-review.mjs --base main
-codex-partner-start.mjs invoice-export "Read app/Exports and propose a split. Risks first."
-codex-partner-say.mjs invoice-export "Your risk 2 doesn't apply. Re-check risk 3."
-codex-partner-list.mjs
-codex-partner-forget.mjs invoice-export
-codex-partner-auth.mjs
+codex-partner-ask.ts "Does the retry loop stop after five attempts?"
+codex-partner-review.ts --base main
+codex-partner-start.ts invoice-export "Read app/Exports and propose a split. Risks first."
+codex-partner-say.ts invoice-export "Your risk 2 doesn't apply. Re-check risk 3."
+codex-partner-list.ts
+codex-partner-forget.ts invoice-export
+codex-partner-auth.ts
 ```
 
 Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox unless the call passes `--write`. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
 
 ## Requirements
 
-- The [Codex CLI](https://github.com/openai/codex) on `PATH`, signed in with `codex login` (or a [token worker](#cloud-sessions) in cloud sessions)
-- Node.js 22 or later
+- The [Codex CLI](https://github.com/openai/codex) on `PATH`, signed in with `codex login` (or a [token worker](#cloud-sessions) in cloud sessions). Codex itself is a Node.js program, installed with `npm install -g @openai/codex`.
+- [Bun](https://bun.sh) 1.4 or later, which runs the scripts. Claude Code cloud sessions ship with it.
 - `git` and `curl`
 
 ## Installation
@@ -67,18 +67,18 @@ wrangler kv namespace create CODEX_AUTH        # put the id in wrangler.jsonc
 wrangler deploy
 openssl rand -hex 32                           # the serve token: keep it for step 3
 wrangler secret put SERVE_TOKEN                # paste the serve token at the prompt
-node scripts/seed.mjs                          # signs in to ChatGPT in the browser
+bun scripts/seed.ts                            # signs in to ChatGPT in the browser
 ```
 
-`seed.mjs` signs in with `codex login` in a temporary Codex home, so the worker owns a login that no other machine refreshes, then seals it under a new `BUNDLE_KEY` secret.
+`seed.ts` signs in with `codex login` in a temporary Codex home, so the worker owns a login that no other machine refreshes, then seals it under a new `BUNDLE_KEY` secret.
 
 ### 2. Check it
 
 ```bash
-CODEX_TOKEN_URL=https://<worker>/auth.json CODEX_TOKEN_BEARER=<serve token> node token-worker/scripts/status.mjs
+CODEX_TOKEN_URL=https://<worker>/auth.json CODEX_TOKEN_BEARER=<serve token> bun token-worker/scripts/status.ts
 ```
 
-A healthy worker reports an `access_expires_at` more than a day away and a `last_error` of `null`. When `last_error` names a failed refresh, run `seed.mjs` again.
+A healthy worker reports an `access_expires_at` more than a day away and a `last_error` of `null`. When `last_error` names a failed refresh, run `seed.ts` again.
 
 ### 3. Configure the cloud environment
 
@@ -102,7 +102,7 @@ The network secret keeps the serve token outside the VM. Claude Code puts the to
 ## Development
 
 ```bash
-node --test 'test/*.test.mjs' 'token-worker/test/*.test.mjs'
+bun test
 ```
 
 The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint.
