@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Sends the next message to a named Codex partner and prints its reply.
 
 import {
@@ -15,11 +15,11 @@ import {
   repositoryRoot,
   runCodexTurn,
   updatePartners,
-} from "./lib.mjs";
+} from "./lib";
 
-const USAGE = `Usage: codex-partner-say.mjs <name> [options] <prompt | ->
+const USAGE = `Usage: codex-partner-say.ts <name> [options] <prompt | ->
 
-Continues the partner session started with codex-partner-start.mjs <name>.
+Continues the partner session started with codex-partner-start.ts <name>.
 Codex sees the whole conversation so far.
 
 Options:
@@ -32,7 +32,7 @@ Options:
 Pass - as the prompt to read it from stdin.
 `;
 
-main(async () => {
+await main(async () => {
   const { positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,
@@ -52,7 +52,7 @@ main(async () => {
 
   if (!partner) {
     throw new PartnerError(
-      `No partner named "${name}" exists in ${repository}. Start one with codex-partner-start.mjs ${name} "<prompt>".`,
+      `No partner named "${name}" exists in ${repository}. Start one with codex-partner-start.ts ${name} "<prompt>".`,
     );
   }
 

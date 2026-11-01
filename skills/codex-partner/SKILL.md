@@ -14,9 +14,9 @@ Codex is a second agent with its own model and its own read of the repository. *
 
 | The user wants | Mode | Script |
 | --- | --- | --- |
-| One answer, no follow-up | ask | `codex-partner-ask.mjs` |
-| Findings on a change: the uncommitted work, a branch, or one commit | review | `codex-partner-review.mjs` |
-| A conversation that builds over turns: pairing, a design debate, an iterative review | partner | `codex-partner-start.mjs` once, then `codex-partner-say.mjs` |
+| One answer, no follow-up | ask | `codex-partner-ask.ts` |
+| Findings on a change: the uncommitted work, a branch, or one commit | review | `codex-partner-review.ts` |
+| A conversation that builds over turns: pairing, a design debate, an iterative review | partner | `codex-partner-start.ts` once, then `codex-partner-say.ts` |
 
 - "Ask Codex whether this regex handles emoji" → ask.
 - "Have Codex review my changes" → review. To work through the findings with Codex afterwards, review with `--as <name>`, then use say.
@@ -30,36 +30,36 @@ A failure prints its message on stderr and exits 1, and the message names the fi
 
 ```bash
 # One question in a throwaway session
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-ask.mjs "Does the retry loop in app/Jobs/SendInvoice.php stop after five attempts? Answer yes or no, citing the line."
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-ask.ts "Does the retry loop in app/Jobs/SendInvoice.php stop after five attempts? Answer yes or no, citing the line."
 
 # Codex's code review of the uncommitted changes, or of the branch against the default branch when the tree is clean
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.ts
 # → Target: uncommitted changes
 #
 #   <findings tagged P0 to P3, with file:line>
 
 # Review the branch against main and keep it as a partner, so say can discuss the findings
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs --base main --as billing-review
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.ts --base main --as billing-review
 
 # Instructions replace the target: Codex reviews what they describe
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.mjs "Review the changes against main. Focus on the retry logic in app/Jobs."
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-review.ts "Review the changes against main. Focus on the retry logic in app/Jobs."
 
 # Start a partner
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-start.mjs invoice-export - <<'EOF'
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-start.ts invoice-export - <<'EOF'
 We are splitting app/Exports/InvoiceExport.php into a query object and a CSV writer.
 Goal: exports of 100k invoices finish under a minute without loading every row into memory.
 Read the class and its tests, then propose the split. List the risks first.
 EOF
 
 # Continue it
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-say.mjs invoice-export "I took your split. Your risk 2 doesn't apply: the writer streams to a temp file. Re-check risk 3 against tests/Feature/InvoiceExportTest.php."
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-say.ts invoice-export "I took your split. Your risk 2 doesn't apply: the writer streams to a temp file. Re-check risk 3 against tests/Feature/InvoiceExportTest.php."
 
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-list.mjs                  # this repository's partners, most recent first (--all: every repository)
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-forget.mjs invoice-export # frees the name for a new conversation
-${CLAUDE_SKILL_DIR}/scripts/codex-partner-auth.mjs                  # where Codex gets its login
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-list.ts                  # this repository's partners, most recent first (--all: every repository)
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-forget.ts invoice-export # frees the name for a new conversation
+${CLAUDE_SKILL_DIR}/scripts/codex-partner-auth.ts                  # where Codex gets its login
 ```
 
-A message longer than one line, or one that holds quotes, backticks, or `$`, goes on stdin: pass `-` as the prompt and a quoted heredoc (`<<'EOF'`).
+A message longer than one line, one that holds quotes, backticks, or `$`, or one that starts with a dash goes on stdin: pass `-` as the prompt and a quoted heredoc (`<<'EOF'`). Bun keeps a `--` for the script only when another argument comes before it, so `-- --prompt` alone reads as an option.
 
 Options for ask, start, and say:
 

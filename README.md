@@ -5,26 +5,26 @@ Talk with [OpenAI Codex](https://github.com/openai/codex) from Claude Code. Ask 
 Everything Claude follows lives in [SKILL.md](skills/codex-partner/SKILL.md).
 
 ```bash
-codex-partner-ask.mjs "Does the retry loop stop after five attempts?"
-codex-partner-review.mjs --base main
-codex-partner-start.mjs invoice-export "Read app/Exports and propose a split. Risks first."
-codex-partner-say.mjs invoice-export "Your risk 2 doesn't apply. Re-check risk 3."
-codex-partner-list.mjs
-codex-partner-forget.mjs invoice-export
-codex-partner-auth.mjs
+codex-partner-ask.ts "Does the retry loop stop after five attempts?"
+codex-partner-review.ts --base main
+codex-partner-start.ts invoice-export "Read app/Exports and propose a split. Risks first."
+codex-partner-say.ts invoice-export "Your risk 2 doesn't apply. Re-check risk 3."
+codex-partner-list.ts
+codex-partner-forget.ts invoice-export
+codex-partner-auth.ts
 ```
 
 Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox unless the call passes `--write`. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
 
 ## Requirements
 
-- The [Codex CLI](https://github.com/openai/codex) on `PATH`, signed in with `codex login` (or a [token worker](#cloud-sessions) in cloud sessions)
-- Node.js 22 or later
+- The [Codex CLI](https://github.com/openai/codex) on `PATH`, signed in with `codex login` (or a [token worker](#cloud-sessions) in cloud sessions). Codex itself is a Node.js program, installed with `npm install -g @openai/codex`.
+- [Bun](https://bun.sh) 1.4 or later, which runs the scripts. Claude Code cloud sessions ship with it.
 - `git` and `curl`
 
 ## Installation
 
-```
+```text
 /plugin marketplace add fgilio/claude-plugins
 /plugin install codex-partner@fgilio
 ```
@@ -50,7 +50,7 @@ A cloud session has no browser for `codex login`, and a ChatGPT login copied int
 
 Codex refreshes a token only in its last 5 minutes. The scripts fetch a new one once less than an hour is left, and the worker never serves a token closer to expiry than that, so a cloud VM never refreshes on its own.
 
-```
+```text
 claude.ai cloud session                     Cloudflare
 ├─ SessionStart hook / each script ──GET──▶ token worker (codex-token)
 │  (network secret swaps in the serve token)├─ cron every 6 h: refresh when < 36 h left
@@ -61,24 +61,29 @@ claude.ai cloud session                     Cloudflare
 ### 1. Deploy the worker
 
 ```bash
+bun install                                    # the wrangler that bun.lock pins
 cd token-worker
 export CLOUDFLARE_ACCOUNT_ID=<account id>
-wrangler kv namespace create CODEX_AUTH        # put the id in wrangler.jsonc
-wrangler deploy
+bun run wrangler kv namespace create CODEX_AUTH  # put the id in wrangler.jsonc
+bun run wrangler deploy
 openssl rand -hex 32                           # the serve token: keep it for step 3
-wrangler secret put SERVE_TOKEN                # paste the serve token at the prompt
-node scripts/seed.mjs                          # signs in to ChatGPT in the browser
+bun run wrangler secret put SERVE_TOKEN        # paste the serve token at the prompt
+bun scripts/seed.ts                            # signs in to ChatGPT in the browser
 ```
 
-`seed.mjs` signs in with `codex login` in a temporary Codex home, so the worker owns a login that no other machine refreshes, then seals it under a new `BUNDLE_KEY` secret.
+`bun run wrangler` runs the wrangler that `package.json` pins, and `seed.ts` calls the same one.
+
+`seed.ts` signs in with `codex login` in a temporary Codex home, so the worker owns a login that no other machine refreshes, then seals it under a new `BUNDLE_KEY` secret.
 
 ### 2. Check it
 
+From the same `token-worker` directory:
+
 ```bash
-CODEX_TOKEN_URL=https://<worker>/auth.json CODEX_TOKEN_BEARER=<serve token> node token-worker/scripts/status.mjs
+CODEX_TOKEN_URL=https://<worker>/auth.json CODEX_TOKEN_BEARER=<serve token> bun scripts/status.ts
 ```
 
-A healthy worker reports an `access_expires_at` more than a day away and a `last_error` of `null`. When `last_error` names a failed refresh, run `seed.mjs` again.
+A healthy worker reports an `access_expires_at` more than a day away and a `last_error` of `null`. When `last_error` names a failed refresh, run `seed.ts` again.
 
 ### 3. Configure the cloud environment
 
@@ -101,11 +106,16 @@ The network secret keeps the serve token outside the VM. Claude Code puts the to
 
 ## Development
 
+The scripts and the token worker are TypeScript that Bun runs as written, with no build step. The repository follows the fleet standard of the [fgilio plugin marketplace](https://github.com/fgilio/claude-plugins/blob/main/fleet/README.md): oxfmt, type-aware oxlint, `tsc`, markdownlint and `bun test`, with the same gates in CI.
+
 ```bash
-node --test 'test/*.test.mjs' 'token-worker/test/*.test.mjs'
+bun install      # the tools at the versions bun.lock pins, and the pre-commit hook
+bun run check    # format, lint, type check, Markdown lint, and every test
 ```
 
-The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint.
+`bun install` installs a lefthook pre-commit hook. On the staged files it runs `oxlint --fix` and oxfmt on TypeScript, oxfmt on JSON, Markdown and YAML, and markdownlint on Markdown, and it adds their fixes to the commit. A lint error the fixer cannot fix stops the commit. Never bypass it with `--no-verify`. The prose rules run in CI from the marketplace's `check-prose.ts`.
+
+The partner tests run the scripts against a fake `codex` on `PATH`. The worker tests run its handlers with an in-memory KV and a stubbed OpenAI token endpoint, and the seed and status scripts run against a fake `wrangler` and a local server. To check the worker bundle without deploying it, run `bun run wrangler deploy --dry-run --outdir <dir>` in `token-worker`.
 
 ## License
 

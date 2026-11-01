@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Stands in for the Codex CLI: logs each call and answers like `codex exec --json`.
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,7 +12,8 @@ const threadId =
   resumeIndex === -1
     ? (process.env.FAKE_CODEX_THREAD_ID ?? "thread-new")
     : args[resumeIndex + 1];
-const replyPath = args[args.indexOf("--output-last-message") + 1];
+const replyFlag = args.indexOf("--output-last-message");
+const replyPath = replyFlag === -1 ? undefined : args[replyFlag + 1];
 
 if (process.env.FAKE_CODEX_LOG) {
   appendFileSync(
@@ -21,7 +22,8 @@ if (process.env.FAKE_CODEX_LOG) {
   );
 }
 
-const emit = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
+const emit = (event: Record<string, unknown>) =>
+  process.stdout.write(`${JSON.stringify(event)}\n`);
 
 if (process.env.FAKE_CODEX_MODE === "fail") {
   emit({ type: "thread.started", thread_id: threadId });
@@ -34,9 +36,7 @@ if (process.env.FAKE_CODEX_MODE !== "no-thread") {
 }
 
 if (process.env.FAKE_CODEX_DELAY_MS) {
-  await new Promise((resolve) =>
-    setTimeout(resolve, Number(process.env.FAKE_CODEX_DELAY_MS)),
-  );
+  await Bun.sleep(Number(process.env.FAKE_CODEX_DELAY_MS));
 }
 
 const reply =
@@ -49,4 +49,9 @@ emit({
   item: { id: "item_1", type: "agent_message", text: reply },
 });
 emit({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } });
+
+if (replyPath === undefined) {
+  throw new Error("fake codex: --output-last-message is missing");
+}
+
 writeFileSync(replyPath, reply);

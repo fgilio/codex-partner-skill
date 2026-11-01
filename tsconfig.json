@@ -1,0 +1,15 @@
+{
+  "extends": [
+    "@tsconfig/strictest/tsconfig.json",
+    "@tsconfig/bun/tsconfig.json"
+  ],
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "allowJs": true,
+    "checkJs": true
+  },
+  "include": ["**/*.ts", "**/*.mts", "**/*.js", "**/*.mjs", "**/*.cjs"],
+  "exclude": ["node_modules"]
+}

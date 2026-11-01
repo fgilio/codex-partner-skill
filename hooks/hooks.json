@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/codex-partner/scripts/codex-partner-auth.mjs\" --quiet",
+            "command": "if command -v bun >/dev/null 2>&1; then bun \"${CLAUDE_PLUGIN_ROOT}/skills/codex-partner/scripts/codex-partner-auth.ts\" --quiet; else echo \"codex-partner needs Bun (https://bun.sh); the Codex login check was skipped\"; fi",
             "timeout": 30
           }
         ]

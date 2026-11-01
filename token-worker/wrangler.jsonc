@@ -1,6 +1,6 @@
 {
   "name": "codex-token",
-  "main": "src/index.mjs",
+  "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
   "preview_urls": false,
@@ -10,7 +10,7 @@
       "id": "e375ecfde5ba4c16a9583a4b04eb2531",
     },
   ],
-  // src/index.mjs sizes its refresh window to this 6-hour interval.
+  // src/index.ts sizes its refresh window to this 6-hour interval.
   "triggers": {
     "crons": ["17 */6 * * *"],
   },
