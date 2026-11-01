@@ -77,8 +77,10 @@ bun scripts/seed.ts                            # signs in to ChatGPT in the brow
 
 ### 2. Check it
 
+From the same `token-worker` directory:
+
 ```bash
-CODEX_TOKEN_URL=https://<worker>/auth.json CODEX_TOKEN_BEARER=<serve token> bun token-worker/scripts/status.ts
+CODEX_TOKEN_URL=https://<worker>/auth.json CODEX_TOKEN_BEARER=<serve token> bun scripts/status.ts
 ```
 
 A healthy worker reports an `access_expires_at` more than a day away and a `last_error` of `null`. When `last_error` names a failed refresh, run `seed.ts` again.
