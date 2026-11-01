@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { isRecord } from "../../skills/codex-partner/scripts/lib";
+import { asText, isRecord } from "../../skills/codex-partner/scripts/lib";
 import { installFake } from "../../test/fixtures/fake-bin";
 import { makeJwt } from "../../test/fixtures/jwt";
 import { rejectionMessage } from "../../test/fixtures/rejection";
@@ -93,6 +93,18 @@ function wranglerCalls(): WranglerCall[] {
 
       return call;
     });
+}
+
+/** Checks a seed summary of dedicatedLogin(); the expiry follows the clock, so only its shape is fixed. */
+function expectSeedSummary(summary: unknown): void {
+  if (!isRecord(summary)) {
+    throw new Error(`The seed summary is not an object: ${asText(summary)}`);
+  }
+
+  const { access_expires_at: accessExpiresAt, ...identity } = summary;
+
+  expect(identity).toEqual({ seeded: true, account_id: "account-1" });
+  expect(accessExpiresAt).toMatch(/^\d{4}-\d\d-\d\dT/);
 }
 
 /** Records each command instead of running it. */
@@ -272,11 +284,7 @@ describe("seed: storeInWorker", () => {
         "--remote",
       ],
     });
-    expect(summary).toEqual({
-      seeded: true,
-      account_id: "account-1",
-      access_expires_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
-    });
+    expectSeedSummary(summary);
   });
 
   test("keeps the sealed file private and generates a new key each run", async () => {
@@ -396,11 +404,7 @@ describe("seed.ts", () => {
       status: 0,
       error: "",
     });
-    expect(JSON.parse(result.stdout)).toEqual({
-      seeded: true,
-      account_id: "account-1",
-      access_expires_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
-    });
+    expectSeedSummary(JSON.parse(result.stdout));
     expect(calls.map((call) => call.args.slice(0, 4))).toEqual([
       ["kv", "key", "put", BUNDLE_KV_KEY],
       ["secret", "put", "BUNDLE_KEY"],
