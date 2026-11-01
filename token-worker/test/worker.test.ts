@@ -327,6 +327,22 @@ describe("scheduled refresh", () => {
     });
   });
 
+  test("refreshes a login whose access token has no readable expiry", async () => {
+    const login = storedLogin(5 * 24 * HOUR_MS);
+    login.tokens.access_token = "not-a-jwt";
+    await storeLogin(login);
+    const newAccessToken = makeJwt({
+      exp: Math.floor((Date.now() + 10 * 24 * HOUR_MS) / 1000),
+    });
+    stubOpenAi(200, { access_token: newAccessToken });
+
+    const outcome = await refreshIfExpiring(env);
+
+    expect(outcome).toEqual({ refreshed: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((await readStoredLogin()).tokens.access_token).toBe(newAccessToken);
+  });
+
   test("keeps the current refresh token when OpenAI does not rotate it", async () => {
     await storeLogin(storedLogin(20 * HOUR_MS));
     stubOpenAi(200, {
