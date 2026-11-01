@@ -179,11 +179,8 @@ function codexCall(index: number): CodexCall {
 }
 
 /** Fails with the script's stderr in the diff when it did not exit 0. */
-function expectSuccess(result: ScriptResult): void {
-  expect({ status: result.status, stderr: result.stderr }).toEqual({
-    status: 0,
-    stderr: expect.any(String),
-  });
+function expectSuccess({ status, stderr }: ScriptResult): void {
+  expect({ status, stderr }).toEqual({ status: 0, stderr });
 }
 
 function lockPath(threadId: string): string {
@@ -219,10 +216,12 @@ function git(...args: string[]): void {
     { cwd: sandbox.project },
   );
 
-  expect({
-    exitCode: result.exitCode,
-    stderr: result.stderr.toString(),
-  }).toEqual({ exitCode: 0, stderr: expect.any(String) });
+  const stderr = result.stderr.toString();
+
+  expect({ exitCode: result.exitCode, stderr }).toEqual({
+    exitCode: 0,
+    stderr,
+  });
 }
 
 function commitFile(name: string): void {
