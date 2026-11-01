@@ -9,9 +9,6 @@
     "token-worker/scripts/*.ts",
     "test/fixtures/fake-*.ts",
   ],
-  // lefthook runs from its own install script, which writes the git hooks,
-  // so no file imports or calls it.
-  "ignoreDependencies": ["lefthook"],
   // The Codex CLI is a Node program the user installs with npm.
   "ignoreBinaries": ["codex"],
 }
