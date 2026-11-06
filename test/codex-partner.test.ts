@@ -463,6 +463,17 @@ describe("codex-partner-ask", () => {
     expect(result.error).toMatch(/Usage: codex-partner-ask\.ts/);
   });
 
+  test("rejects --worktree, which only a partner takes", async () => {
+    const result = await runScript("codex-partner-ask.ts", [
+      "--worktree",
+      "Hi",
+    ]);
+
+    expect(result.status).toBe(1);
+    expect(result.error).toMatch(/Unknown option --worktree/);
+    expect(codexCalls()).toEqual([]);
+  });
+
   test("says a boolean option takes no value", async () => {
     const result = await runScript("codex-partner-ask.ts", [
       "--write=true",
@@ -667,6 +678,82 @@ describe("partners", () => {
       "sandbox_workspace_write.network_access=false",
     ]);
     expect(call.args).not.toContain('sandbox_mode="read-only"');
+  });
+
+  test("start --worktree saves the worktree Codex created, and say runs and writes there", async () => {
+    commitFile("cart.js");
+
+    const started = await runScript(
+      "codex-partner-start.ts",
+      ["review", "--worktree", "Hi"],
+      { env: { FAKE_CODEX_THREAD_ID: "thread-42" } },
+    );
+    const continued = await runScript("codex-partner-say.ts", [
+      "review",
+      "--write",
+      "Fix it.",
+    ]);
+    const listed = await runScript("codex-partner-list.ts", []);
+    const startCall = codexCall(0);
+    const sayCall = codexCall(1);
+    const worktree = startCall.cwd;
+    const addDirFlag = sayCall.args.indexOf("--add-dir");
+
+    expectSuccess(started);
+    expectSuccess(continued);
+    expect(startCall.args.slice(-2)).toEqual(["--worktree", "-"]);
+    expect(dirname(dirname(worktree))).toBe(realpathSync(sandbox.worktrees));
+    expect(records(listed.json).map((partner) => partner.directory)).toEqual([
+      worktree,
+    ]);
+    expect(records(listed.json).map((partner) => partner.repository)).toEqual([
+      realpathSync(sandbox.project),
+    ]);
+    expect(sayCall.cwd).toBe(worktree);
+    expect(sayCall.args.slice(-3)).toEqual(["resume", "thread-42", "-"]);
+    expect(sayCall.args).not.toContain("--worktree");
+    expect(sayCall.args.slice(addDirFlag, addDirFlag + 2)).toEqual([
+      "--add-dir",
+      worktree,
+    ]);
+  });
+
+  test("start without --worktree runs Codex in the current directory", async () => {
+    const started = await runScript("codex-partner-start.ts", ["review", "Hi"]);
+    const call = codexCall(0);
+
+    expectSuccess(started);
+    expect(call.args).not.toContain("--worktree");
+    expect(call.cwd).toBe(realpathSync(sandbox.project));
+  });
+
+  test("start --worktree refuses a directory outside a git repository, before calling Codex", async () => {
+    const result = await runScript(
+      "codex-partner-start.ts",
+      ["review", "--worktree", "Hi"],
+      { cwd: sandbox.root },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.error).toMatch(/--worktree needs a git repository/);
+    expect(codexCalls()).toEqual([]);
+  });
+
+  test("start --worktree fails without saving when Codex created no worktree", async () => {
+    commitFile("cart.js");
+
+    const result = await runScript(
+      "codex-partner-start.ts",
+      ["review", "--worktree", "Hi"],
+      { env: { FAKE_CODEX_MODE: "no-worktree" } },
+    );
+    const listed = await runScript("codex-partner-list.ts", []);
+
+    expect(result.status).toBe(1);
+    expect(result.error).toMatch(
+      /Codex replied on thread thread-new, but no new git worktree appeared/,
+    );
+    expect(listed.json).toEqual([]);
   });
 
   test("list shows the repository's partners, most recently used first", async () => {
@@ -1113,8 +1200,9 @@ describe("codex-partner-review", () => {
     expect(codexCalls()).toHaveLength(1);
   });
 
-  test("refuses --write, --base with --commit, and a target outside a git repository", async () => {
+  test("refuses --write, --worktree, --base with --commit, and a target outside a git repository", async () => {
     const write = await runScript("codex-partner-review.ts", ["--write"]);
+    const worktree = await runScript("codex-partner-review.ts", ["--worktree"]);
     const both = await runScript("codex-partner-review.ts", [
       "--base",
       "main",
@@ -1126,6 +1214,7 @@ describe("codex-partner-review", () => {
     });
 
     expect(write.error).toMatch(/Unknown option --write/);
+    expect(worktree.error).toMatch(/Unknown option --worktree/);
     expect(both.error).toMatch(/Pass --base or --commit, not both/);
     expect(outside.error).toMatch(/is not inside a git repository/);
     expect(codexCalls()).toEqual([]);

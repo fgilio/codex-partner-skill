@@ -240,17 +240,24 @@ export function parseTurnArguments(
   {
     defaults,
     valueFlags = [],
+    booleanFlags = [],
     allowsWrite = true,
   }: {
     defaults: TurnDefaults;
     valueFlags?: string[];
+    booleanFlags?: string[];
     allowsWrite?: boolean;
   },
 ): ParsedArguments & { options: TurnOptions; asJson: boolean } {
   const parsed = parseArguments(argv, {
     usage,
     valueFlags: ["model", "effort", ...valueFlags],
-    booleanFlags: ["mcp", "json", ...(allowsWrite ? ["write"] : [])],
+    booleanFlags: [
+      "mcp",
+      "json",
+      ...(allowsWrite ? ["write"] : []),
+      ...booleanFlags,
+    ],
   });
 
   return {
@@ -485,23 +492,31 @@ function isProcessAlive(pid: number): boolean {
 
 /**
  * Runs one Codex turn and returns its thread id and final message.
+ *
+ * A new turn `inWorktree` runs in a worktree Codex creates under its home.
+ * A resume runs wherever it is started, so later turns pass that worktree
+ * as their directory.
  */
 export function runCodexTurn({
   prompt,
   threadId,
   isEphemeral = false,
+  inWorktree = false,
   options,
   directory,
 }: {
   prompt: string;
   threadId?: string;
   isEphemeral?: boolean;
+  inWorktree?: boolean;
   options: TurnOptions;
   directory: string;
 }): Promise<CodexResult> {
   return runCodexExec({
     // "-" reads the prompt from stdin, clear of argv length limits.
-    command: threadId ? ["resume", threadId, "-"] : ["-"],
+    command: threadId
+      ? ["resume", threadId, "-"]
+      : [...(inWorktree ? ["--worktree"] : []), "-"],
     stdin: prompt,
     threadId,
     isEphemeral,

@@ -14,7 +14,7 @@ codex-partner-forget.ts invoice-export
 codex-partner-auth.ts
 ```
 
-Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox. With `--write` they run in its workspace-write sandbox instead: Codex can edit files inside the repository, with network access off and no approval prompts. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
+Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox. With `--write` they run in its workspace-write sandbox instead: Codex can edit files inside the repository, with network access off and no approval prompts. A partner started with `--worktree` runs in a Git worktree that Codex creates under `~/.codex/worktrees`, so its edits stay out of your checkout until you review them. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
 
 ## Requirements
 
