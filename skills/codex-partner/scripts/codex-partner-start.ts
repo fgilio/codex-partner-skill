@@ -2,12 +2,16 @@
 // Starts a named Codex partner session in this repository and prints its first reply.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { basename, join } from "node:path";
 
 import {
+  type CodexResult,
   PartnerError,
   assertNewPartner,
   assertPartnerName,
   main,
+  partnerHome,
   parseTurnArguments,
   printResult,
   readPrompt,
@@ -28,7 +32,7 @@ Options:
   --model <id>       Codex model (default: ${defaults.model})
   --effort <level>   Reasoning effort (default: ${defaults.effort})
   --write            Let Codex edit files inside the repository, in its workspace-write sandbox with network off
-  --worktree         Run the partner in a Git worktree of its own under ~/.codex/worktrees, so the checkout stays clean. The worktree stays after forget; remove it with git worktree remove
+  --worktree         Run the partner in a Git worktree of its own under $XDG_STATE_HOME/codex-partner/worktrees (or ~/.local/state/codex-partner/worktrees), so the checkout stays clean. The worktree stays after forget; remove it with git worktree remove
   --mcp              Keep the MCP servers from the Codex config switched on
   --json             Print JSON with the name, thread id, and reply
 
@@ -52,27 +56,28 @@ await main(async () => {
     );
   }
 
-  const directory = process.cwd();
   const repository = repositoryRoot();
 
   assertNewPartner(repository, name);
 
-  const worktreesBefore = inWorktree ? worktreePaths(directory) : [];
-  const turn = await runCodexTurn({
-    prompt: readPrompt(promptArgument, USAGE),
-    inWorktree,
-    options,
-    directory,
-  });
+  const prompt = readPrompt(promptArgument, USAGE);
+  const directory = inWorktree
+    ? addWorktree(repository, worktreePath(repository, name))
+    : process.cwd();
 
-  savePartner({
-    name,
-    repository,
-    directory: inWorktree
-      ? newWorktree(worktreesBefore, worktreePaths(directory), turn.threadId)
-      : directory,
-    threadId: turn.threadId,
-  });
+  let turn: CodexResult;
+
+  try {
+    turn = await runCodexTurn({ prompt, options, directory });
+  } catch (error) {
+    if (inWorktree) {
+      removeWorktree(repository, directory);
+    }
+
+    throw error;
+  }
+
+  savePartner({ name, repository, directory, threadId: turn.threadId });
 
   printResult(
     { name, thread_id: turn.threadId, reply: turn.reply },
@@ -80,41 +85,39 @@ await main(async () => {
   );
 });
 
-function worktreePaths(directory: string): string[] {
-  const result = spawnSync("git", ["worktree", "list", "--porcelain"], {
-    cwd: directory,
-    encoding: "utf8",
-  });
+/**
+ * One directory per checkout, so two checkouts that share a basename
+ * never hand a partner the same path.
+ */
+function worktreePath(repository: string, name: string): string {
+  const hash = createHash("sha256").update(repository).digest("hex");
+
+  return join(
+    partnerHome(),
+    "worktrees",
+    `${basename(repository)}-${hash.slice(0, 8)}`,
+    name,
+  );
+}
+
+function addWorktree(repository: string, path: string): string {
+  const result = spawnSync(
+    "git",
+    ["worktree", "add", "--detach", path, "HEAD"],
+    { cwd: repository, encoding: "utf8" },
+  );
 
   if (result.status !== 0) {
     throw new PartnerError(
-      `--worktree needs a git repository, and ${directory} is not inside one.`,
+      `Could not create the worktree ${path}: ${result.stderr.trim()}\nIf an earlier partner of this name left it behind, remove it with git worktree remove ${path}, or run git worktree prune when the directory is already gone.`,
     );
   }
 
-  return result.stdout
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length));
+  return path;
 }
 
-/**
- * The worktree Codex created for the first turn. Its id is Codex's own,
- * so the only way to find it is the one entry git did not list before.
- */
-function newWorktree(
-  before: string[],
-  after: string[],
-  threadId: string | undefined,
-): string {
-  const added = after.filter((path) => !before.includes(path));
-  const [worktree] = added;
-
-  if (worktree === undefined || added.length > 1) {
-    throw new PartnerError(
-      `Codex replied on thread ${threadId ?? "(unknown)"}, but ${added.length === 0 ? "no new git worktree appeared" : `${added.length} new git worktrees appeared (${added.join(", ")})`}, so the partner was not saved. Check git worktree list, then start the partner again.`,
-    );
-  }
-
-  return worktree;
+function removeWorktree(repository: string, path: string): void {
+  spawnSync("git", ["worktree", "remove", "--force", path], {
+    cwd: repository,
+  });
 }

@@ -312,7 +312,7 @@ export function repositoryRoot(directory = process.cwd()): string {
   return result.status === 0 ? result.stdout.trim() : directory;
 }
 
-function partnerHome(): string {
+export function partnerHome(): string {
   return join(
     process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"),
     "codex-partner",
@@ -492,31 +492,23 @@ function isProcessAlive(pid: number): boolean {
 
 /**
  * Runs one Codex turn and returns its thread id and final message.
- *
- * A new turn `inWorktree` runs in a worktree Codex creates under its home.
- * A resume runs wherever it is started, so later turns pass that worktree
- * as their directory.
  */
 export function runCodexTurn({
   prompt,
   threadId,
   isEphemeral = false,
-  inWorktree = false,
   options,
   directory,
 }: {
   prompt: string;
   threadId?: string;
   isEphemeral?: boolean;
-  inWorktree?: boolean;
   options: TurnOptions;
   directory: string;
 }): Promise<CodexResult> {
   return runCodexExec({
     // "-" reads the prompt from stdin, clear of argv length limits.
-    command: threadId
-      ? ["resume", threadId, "-"]
-      : [...(inWorktree ? ["--worktree"] : []), "-"],
+    command: threadId ? ["resume", threadId, "-"] : ["-"],
     stdin: prompt,
     threadId,
     isEphemeral,
