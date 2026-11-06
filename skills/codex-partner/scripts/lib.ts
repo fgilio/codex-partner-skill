@@ -296,12 +296,13 @@ export function assertPartnerName(
   }
 }
 
-export function repositoryRoot(): string {
+export function repositoryRoot(directory = process.cwd()): string {
   const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: directory,
     encoding: "utf8",
   });
 
-  return result.status === 0 ? result.stdout.trim() : process.cwd();
+  return result.status === 0 ? result.stdout.trim() : directory;
 }
 
 function partnerHome(): string {
@@ -539,16 +540,21 @@ export function runCodexReview({
 }
 
 /**
- * The Codex CLI arguments that apply a sandbox mode.
+ * The Codex CLI arguments that apply a sandbox mode to a turn run in
+ * `directory`.
  *
  * Nothing answers an approval prompt in `codex exec`, so a writing turn
- * never asks, and the sandbox alone bounds what it can do.
+ * never asks, and the sandbox alone bounds what it can do. The sandbox
+ * only opens the working directory, so a turn started in a subdirectory
+ * gets the whole repository through --add-dir.
  */
-function sandboxArguments(mode: SandboxMode): string[] {
+function sandboxArguments(mode: SandboxMode, directory: string): string[] {
   return mode === "workspace-write"
     ? [
         "--sandbox",
         "workspace-write",
+        "--add-dir",
+        repositoryRoot(directory),
         "--config",
         'approval_policy="never"',
         "--config",
@@ -582,7 +588,7 @@ async function runCodexExec({
     "--json",
     "--output-last-message",
     replyPath,
-    ...sandboxArguments(options.sandbox),
+    ...sandboxArguments(options.sandbox, directory),
     ...(options.model ? ["--model", options.model] : []),
     ...(options.effort
       ? ["--config", `model_reasoning_effort="${options.effort}"`]
