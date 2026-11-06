@@ -82,7 +82,7 @@ Options for ask, start, and say:
 | `--write` | Codex may edit files inside the repository and run commands, in its workspace-write sandbox with network off. |
 | `--mcp` | Keeps the MCP servers of the Codex config switched on. They are off by default. |
 
-`--worktree` on start runs the partner in a Git worktree of its own, so your checkout stays clean while it implements; review its work with `git -C <worktree> diff`. The path is the partner's `directory` in `list`. Every say runs there, and `--write` opens that worktree, not your checkout. The worktree stays after forget; remove it with `git worktree remove`.
+`--worktree` on start runs the partner in a Git worktree of its own, so your checkout stays clean while it implements. Review its work with `git -C <worktree> diff`. The path is the partner's `directory` in `list`. Every say runs there, and `--write` opens that worktree, not your checkout. The worktree stays after forget, so remove it with `git worktree remove` when you are done with it.
 
 Review takes `--effort`, `--model`, `--mcp`, `--base <branch>`, `--commit <sha>`, and `--as <name>`. Its effort defaults to `high`. It always runs read-only, and it takes a target or instructions, never both.
 
