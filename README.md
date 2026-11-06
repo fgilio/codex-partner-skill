@@ -52,7 +52,7 @@ The partner list lives in `$XDG_STATE_HOME/codex-partner`, or `~/.local/state/co
 
 ### Permission prompts
 
-The skill's `allowed-tools` line lets Claude run its scripts without a prompt, in every permission mode. The scripts that run Codex do so in its sandbox, read-only or workspace-write; auth, list and forget never run Codex and only touch the Codex login and the partner list. No `settings.json` rule is needed, and a rule with a leading wildcard would be dropped in auto mode.
+The skill's `allowed-tools` line lets Claude run its scripts without a prompt, in every permission mode. The scripts that run Codex do so in its sandbox, read-only or workspace-write. Auth, list and forget never run Codex and only touch the Codex login and the partner list. No `settings.json` rule is needed, and a rule with a leading wildcard would be dropped in auto mode.
 
 ## Cloud sessions
 
