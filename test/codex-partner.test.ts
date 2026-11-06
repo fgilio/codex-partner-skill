@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -372,14 +373,18 @@ describe("codex-partner-ask", () => {
     ).toBe(false);
   });
 
-  test("--write runs Codex in the workspace-write sandbox with network off", async () => {
-    await runScript("codex-partner-ask.ts", ["--write", "Hi"]);
+  test("--write runs Codex in the workspace-write sandbox over the whole repository, with network off", async () => {
+    await runScript("codex-partner-ask.ts", ["--write", "Hi"], {
+      cwd: join(sandbox.project, "src"),
+    });
     const call = codexCall(0);
     const sandboxFlag = call.args.indexOf("--sandbox");
 
-    expect(call.args.slice(sandboxFlag, sandboxFlag + 6)).toEqual([
+    expect(call.args.slice(sandboxFlag, sandboxFlag + 8)).toEqual([
       "--sandbox",
       "workspace-write",
+      "--add-dir",
+      realpathSync(sandbox.project),
       "--config",
       'approval_policy="never"',
       "--config",
