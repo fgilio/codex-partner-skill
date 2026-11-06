@@ -49,20 +49,22 @@ export interface TurnOptions {
 }
 
 /** How far Codex may reach beyond reading the workspace. */
-type SandboxMode = "read-only" | "danger-full-access";
+type SandboxMode = "read-only" | "workspace-write";
 
 /** The model and reasoning effort a command falls back to. */
 export interface TurnDefaults {
-  model?: string;
-  effort?: string;
+  model: string;
+  effort: string;
 }
 
-/** The model and reasoning effort each command uses unless the call passes --model or --effort. An unset value leaves the choice to the Codex config. */
+const DEFAULT_MODEL = "gpt-6.1-sol";
+
+/** The model and reasoning effort each command uses unless the call passes --model or --effort. */
 export const turnDefaults: Record<"ask" | "partner" | "review", TurnDefaults> =
   {
-    ask: { effort: "low" },
-    partner: {},
-    review: {},
+    ask: { model: DEFAULT_MODEL, effort: "medium" },
+    partner: { model: DEFAULT_MODEL, effort: "high" },
+    review: { model: DEFAULT_MODEL, effort: "high" },
   };
 
 export interface CodexResult {
@@ -232,11 +234,6 @@ function splitFlag(flag: string): [string, string | undefined] {
     : [flag.slice(0, boundary), flag.slice(boundary + 1)];
 }
 
-/** A default as the usage text shows it. */
-export function describeDefault(value: string | undefined): string {
-  return value ?? "the Codex config";
-}
-
 export function parseTurnArguments(
   argv: string[],
   usage: string,
@@ -261,9 +258,7 @@ export function parseTurnArguments(
     options: {
       model: parsed.values["model"] ?? defaults.model,
       effort: parsed.values["effort"] ?? defaults.effort,
-      sandbox: parsed.switches.has("write")
-        ? "danger-full-access"
-        : "read-only",
+      sandbox: parsed.switches.has("write") ? "workspace-write" : "read-only",
       keepsMcpServers: parsed.switches.has("mcp"),
     },
     asJson: parsed.switches.has("json"),
@@ -543,10 +538,22 @@ export function runCodexReview({
   });
 }
 
-/** The Codex CLI arguments that apply a sandbox mode. */
+/**
+ * The Codex CLI arguments that apply a sandbox mode.
+ *
+ * Nothing answers an approval prompt in `codex exec`, so a writing turn
+ * never asks, and the sandbox alone bounds what it can do.
+ */
 function sandboxArguments(mode: SandboxMode): string[] {
-  return mode === "danger-full-access"
-    ? ["--dangerously-bypass-approvals-and-sandbox"]
+  return mode === "workspace-write"
+    ? [
+        "--sandbox",
+        "workspace-write",
+        "--config",
+        'approval_policy="never"',
+        "--config",
+        "sandbox_workspace_write.network_access=false",
+      ]
     : ["--config", 'sandbox_mode="read-only"'];
 }
 

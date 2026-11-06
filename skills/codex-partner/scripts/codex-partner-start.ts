@@ -5,7 +5,6 @@ import {
   PartnerError,
   assertNewPartner,
   assertPartnerName,
-  describeDefault,
   main,
   parseTurnArguments,
   printResult,
@@ -24,9 +23,9 @@ Starts a Codex session that remembers the conversation. Continue it with
 codex-partner-say.ts <name>. Names are scoped to the current repository.
 
 Options:
-  --model <id>       Codex model (default: ${describeDefault(defaults.model)})
-  --effort <level>   Reasoning effort (default: ${describeDefault(defaults.effort)})
-  --write            Let Codex edit files and run any command, with no sandbox
+  --model <id>       Codex model (default: ${defaults.model})
+  --effort <level>   Reasoning effort (default: ${defaults.effort})
+  --write            Let Codex edit files inside the repository, in its workspace-write sandbox with network off
   --mcp              Keep the MCP servers from the Codex config switched on
   --json             Print JSON with the name, thread id, and reply
 

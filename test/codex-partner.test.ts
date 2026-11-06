@@ -149,6 +149,18 @@ function isCodexCall(value: unknown): value is CodexCall {
   );
 }
 
+/** The model and reasoning effort a Codex call ran with. */
+function modelAndEffort(
+  call: CodexCall,
+): [string | undefined, string | undefined] {
+  const modelFlag = call.args.indexOf("--model");
+  const effort = call.args
+    .map((argument) => /^model_reasoning_effort="(.*)"$/.exec(argument)?.[1])
+    .find((value) => value !== undefined);
+
+  return [modelFlag === -1 ? undefined : call.args[modelFlag + 1], effort];
+}
+
 function codexCalls(): CodexCall[] {
   if (!existsSync(sandbox.log)) {
     return [];
@@ -273,7 +285,7 @@ describe("the fake codex", () => {
 });
 
 describe("codex-partner-ask", () => {
-  test("sends the prompt on stdin to a read-only, ephemeral session at low effort", async () => {
+  test("sends the prompt on stdin to a read-only, ephemeral session on gpt-6.1-sol at medium effort", async () => {
     const result = await runScript("codex-partner-ask.ts", [
       "Does the loop stop?",
     ]);
@@ -284,31 +296,32 @@ describe("codex-partner-ask", () => {
     expect(call.stdin).toBe("Does the loop stop?");
     expect(call.args.slice(-2)).toEqual(["--ephemeral", "-"]);
     expect(call.args).toContain('sandbox_mode="read-only"');
-    expect(call.args).toContain('model_reasoning_effort="low"');
-    expect(call.args).not.toContain(
-      "--dangerously-bypass-approvals-and-sandbox",
-    );
+    expect(call.args).not.toContain("--sandbox");
+    expect(modelAndEffort(call)).toEqual(["gpt-6.1-sol", "medium"]);
   });
 
-  test("passes --model and --effort, and leaves a partner's defaults to the Codex config", async () => {
+  test("--model and --effort override the defaults, and partners run gpt-6.1-sol at high effort", async () => {
     await runScript("codex-partner-ask.ts", [
       "--model",
       "model-a",
-      "--effort=high",
+      "--effort=low",
       "Hi",
     ]);
     await runScript("codex-partner-start.ts", ["review", "Hi"]);
-    const flagged = codexCall(0);
-    const defaulted = codexCall(1);
+    await runScript("codex-partner-say.ts", ["review", "Again"]);
+    await runScript("codex-partner-say.ts", [
+      "review",
+      "--model",
+      "model-b",
+      "--effort",
+      "minimal",
+      "Once more",
+    ]);
 
-    expect(flagged.args[flagged.args.indexOf("--model") + 1]).toBe("model-a");
-    expect(flagged.args).toContain('model_reasoning_effort="high"');
-    expect(defaulted.args).not.toContain("--model");
-    expect(
-      defaulted.args.some((argument) =>
-        argument.startsWith("model_reasoning_effort"),
-      ),
-    ).toBe(false);
+    expect(modelAndEffort(codexCall(0))).toEqual(["model-a", "low"]);
+    expect(modelAndEffort(codexCall(1))).toEqual(["gpt-6.1-sol", "high"]);
+    expect(modelAndEffort(codexCall(2))).toEqual(["gpt-6.1-sol", "high"]);
+    expect(modelAndEffort(codexCall(3))).toEqual(["model-b", "minimal"]);
   });
 
   test("reads the prompt from stdin when it is -", async () => {
@@ -359,11 +372,19 @@ describe("codex-partner-ask", () => {
     ).toBe(false);
   });
 
-  test("--write runs Codex without a sandbox", async () => {
+  test("--write runs Codex in the workspace-write sandbox with network off", async () => {
     await runScript("codex-partner-ask.ts", ["--write", "Hi"]);
     const call = codexCall(0);
+    const sandboxFlag = call.args.indexOf("--sandbox");
 
-    expect(call.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(call.args.slice(sandboxFlag, sandboxFlag + 6)).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "--config",
+      'approval_policy="never"',
+      "--config",
+      "sandbox_workspace_write.network_access=false",
+    ]);
     expect(call.args).not.toContain('sandbox_mode="read-only"');
   });
 
@@ -727,7 +748,7 @@ describe("partners", () => {
 });
 
 describe("codex-partner-review", () => {
-  test("reviews the uncommitted changes in a read-only, ephemeral session", async () => {
+  test("reviews the uncommitted changes in a read-only, ephemeral session on gpt-6.1-sol at high effort", async () => {
     editFile();
 
     const result = await runScript("codex-partner-review.ts", []);
@@ -741,11 +762,7 @@ describe("codex-partner-review", () => {
       "--uncommitted",
     ]);
     expect(call.args).toContain('sandbox_mode="read-only"');
-    expect(
-      call.args.some((argument) =>
-        argument.startsWith("model_reasoning_effort"),
-      ),
-    ).toBe(false);
+    expect(modelAndEffort(call)).toEqual(["gpt-6.1-sol", "high"]);
   });
 
   test("reviews the branch against origin/HEAD when the working tree is clean", async () => {
@@ -866,7 +883,7 @@ describe("codex-partner-review", () => {
 
     const reviewed = await runScript(
       "codex-partner-review.ts",
-      ["--as", "cart", "--effort", "high", "--json"],
+      ["--as", "cart", "--effort", "xhigh", "--json"],
       { env: { FAKE_CODEX_THREAD_ID: "thread-7" } },
     );
     const continued = await runScript("codex-partner-say.ts", [
@@ -884,7 +901,7 @@ describe("codex-partner-review", () => {
       reply: "review of: --uncommitted",
     });
     expect(reviewCall.args).not.toContain("--ephemeral");
-    expect(reviewCall.args).toContain('model_reasoning_effort="high"');
+    expect(reviewCall.args).toContain('model_reasoning_effort="xhigh"');
     expectSuccess(continued);
     expect(sayCall.args.slice(-3)).toEqual(["resume", "thread-7", "-"]);
   });

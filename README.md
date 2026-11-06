@@ -14,7 +14,7 @@ codex-partner-forget.ts invoice-export
 codex-partner-auth.ts
 ```
 
-Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox unless the call passes `--write`. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
+Each partner is a Codex session resumed with `codex exec resume`, so it holds the whole conversation without a daemon, a terminal multiplexer, or an MCP server. Asks and partners run in Codex's read-only sandbox. With `--write` they run in its workspace-write sandbox instead: Codex can edit files inside the repository, with network access off and no approval prompts. Reviews use Codex's built-in reviewer (`codex exec review`) and always run read-only.
 
 ## Requirements
 
@@ -33,7 +33,13 @@ Installed as a plugin, the skill runs as `/codex-partner:codex-partner`, and Cla
 
 ## Configuration
 
-Codex's own config sets the model and reasoning effort unless a call passes `--model` or `--effort`. Asks default to `low` effort.
+Each command runs the model and reasoning effort below unless a call passes `--model` or `--effort`:
+
+| Command                                          | Model         | Effort   |
+| ------------------------------------------------ | ------------- | -------- |
+| `codex-partner-ask.ts`                           | `gpt-6.1-sol` | `medium` |
+| `codex-partner-start.ts`, `codex-partner-say.ts` | `gpt-6.1-sol` | `high`   |
+| `codex-partner-review.ts`                        | `gpt-6.1-sol` | `high`   |
 
 MCP servers from the Codex config stay off for every call unless it passes `--mcp`, so an OAuth server can't open a browser in the middle of a turn.
 
@@ -43,6 +49,25 @@ The partner list lives in `$XDG_STATE_HOME/codex-partner`, or `~/.local/state/co
 | --- | --- |
 | `CODEX_TOKEN_URL` | The token worker's `/auth.json` URL. Set only in cloud environments. |
 | `CODEX_TOKEN_BEARER` | The worker's serve token. A cloud environment sets it through a network secret, so the session holds only a placeholder. Without it the worker answers 401. |
+
+### Running the scripts without a permission prompt
+
+Claude Code asks before each script runs. To let it run them without asking, add these rules to `.claude/settings.json` in the project, or to your user settings in `~/.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(*/skills/codex-partner/scripts/codex-partner-ask.ts *)",
+      "Bash(*/skills/codex-partner/scripts/codex-partner-start.ts *)",
+      "Bash(*/skills/codex-partner/scripts/codex-partner-say.ts *)",
+      "Bash(*/skills/codex-partner/scripts/codex-partner-review.ts *)"
+    ]
+  }
+}
+```
+
+Each rule names one script, and every one of them runs Codex in a sandbox, read-only or workspace-write, so no rule covers anything that runs without one.
 
 ## Cloud sessions
 
