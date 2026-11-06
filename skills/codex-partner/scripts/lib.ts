@@ -240,17 +240,24 @@ export function parseTurnArguments(
   {
     defaults,
     valueFlags = [],
+    booleanFlags = [],
     allowsWrite = true,
   }: {
     defaults: TurnDefaults;
     valueFlags?: string[];
+    booleanFlags?: string[];
     allowsWrite?: boolean;
   },
 ): ParsedArguments & { options: TurnOptions; asJson: boolean } {
   const parsed = parseArguments(argv, {
     usage,
     valueFlags: ["model", "effort", ...valueFlags],
-    booleanFlags: ["mcp", "json", ...(allowsWrite ? ["write"] : [])],
+    booleanFlags: [
+      "mcp",
+      "json",
+      ...(allowsWrite ? ["write"] : []),
+      ...booleanFlags,
+    ],
   });
 
   return {
@@ -305,7 +312,7 @@ export function repositoryRoot(directory = process.cwd()): string {
   return result.status === 0 ? result.stdout.trim() : directory;
 }
 
-function partnerHome(): string {
+export function partnerHome(): string {
   return join(
     process.env.XDG_STATE_HOME || join(homedir(), ".local", "state"),
     "codex-partner",

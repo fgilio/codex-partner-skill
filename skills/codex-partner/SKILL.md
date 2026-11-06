@@ -33,7 +33,7 @@ The user prefers that you put Codex to work as a subagent with its own opinions,
 Prefer handing Codex, early, a substantial part of the task that you can check on its own: an investigation, an implementation, a first draft. Give it the outcome, the scope, the constraints, and the acceptance criteria. Run it in the background and continue another part yourself while it works.
 
 - Reuse a named partner while its context stays relevant. It answers one message at a time, so batch what changed into one message between turns rather than sending each fact.
-- Start several partners when the task has independent fronts. When two of them write, give each its own files or its own worktree.
+- Start several partners when the task has independent fronts. When two of them write, give each its own files, or start each with `--worktree` so it writes in a worktree of its own.
 - A small self-contained question is still an ask.
 
 ## Commands
@@ -82,6 +82,8 @@ Options for ask, start, and say:
 | `--write` | Codex may edit files inside the repository and run commands, in its workspace-write sandbox with network off. |
 | `--mcp` | Keeps the MCP servers of the Codex config switched on. They are off by default. |
 
+`--worktree` on start runs the partner in a Git worktree of its own, so your checkout stays clean while it implements. The worktree starts at your checkout's `HEAD` and lives at `$XDG_STATE_HOME/codex-partner/worktrees/<repository>-<hash>/<name>`, or under `~/.local/state` when `XDG_STATE_HOME` is unset. The path is the partner's `directory` in `list`. Review its work with `git -C <worktree> diff`. Every say runs there, and `--write` opens that worktree, not your checkout. The worktree stays after forget, so remove it with `git worktree remove` when you are done with it.
+
 Review takes `--effort`, `--model`, `--mcp`, `--base <branch>`, `--commit <sha>`, and `--as <name>`. Its effort defaults to `high`. It always runs read-only, and it takes a target or instructions, never both.
 
 ## Brief
@@ -119,7 +121,7 @@ When the evidence converges, report one position. Report two only when they diff
 
 ## Edits
 
-`--write` on an ask or a partner lets Codex implement inside the repository, in its sandbox. Use it when the user asked for an implementation that Codex can own, not only when the user named Codex. Review Codex's changes with `git diff` and run the tests yourself before you build on them: the sandbox blocks listeners and some pipes, so a test suite that starts a server fails inside it even when the code is right. When you and a partner both edit, keep your files apart.
+`--write` on an ask or a partner lets Codex implement inside the repository, in its sandbox. Use it when the user asked for an implementation that Codex can own, not only when the user named Codex. Review Codex's changes with `git diff` and run the tests yourself before you build on them: the sandbox blocks listeners and some pipes, so a test suite that starts a server fails inside it even when the code is right. When you and a partner both edit, keep your files apart, or start the partner with `--worktree`: its diff then lives in the worktree, so run `git -C <worktree> diff` and the tests there.
 
 ## Lifetime
 
