@@ -119,7 +119,7 @@ When the evidence converges, report one position. Report two only when they diff
 
 ## Edits
 
-`--write` on an ask or a partner lets Codex implement inside the repository, in its sandbox. Use it when the user asked for an implementation that Codex can own, not only when the user named Codex. Review Codex's changes with `git diff` and the tests before you build on them. When you and a partner both edit, keep your files apart.
+`--write` on an ask or a partner lets Codex implement inside the repository, in its sandbox. Use it when the user asked for an implementation that Codex can own, not only when the user named Codex. Review Codex's changes with `git diff` and run the tests yourself before you build on them: the sandbox blocks listeners and some pipes, so a test suite that starts a server fails inside it even when the code is right. When you and a partner both edit, keep your files apart.
 
 ## Lifetime
 

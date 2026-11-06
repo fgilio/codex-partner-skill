@@ -444,6 +444,15 @@ describe("codex-partner-ask", () => {
     expect(codexCalls()).toEqual([]);
   });
 
+  test("--help prints the default model and medium effort", async () => {
+    const result = await runScript("codex-partner-ask.ts", ["--help"]);
+
+    expectSuccess(result);
+    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Reasoning effort (default: medium)");
+    expect(codexCalls()).toEqual([]);
+  });
+
   // Bun takes a `--` right after the script path as its own separator, so
   // the scripts see one only when another argument comes before it.
   test("passes a prompt that starts with a dash after --", async () => {
@@ -482,6 +491,48 @@ describe("codex-partner-ask", () => {
 });
 
 describe("partners", () => {
+  test("start --help prints the default model and high effort", async () => {
+    const result = await runScript("codex-partner-start.ts", ["--help"]);
+
+    expectSuccess(result);
+    expect(result.stdout).toStartWith("Usage: codex-partner-start.ts");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Reasoning effort (default: high)");
+    expect(codexCalls()).toEqual([]);
+  });
+
+  test("say --help prints the default model and high effort", async () => {
+    const result = await runScript("codex-partner-say.ts", ["--help"]);
+
+    expectSuccess(result);
+    expect(result.stdout).toStartWith("Usage: codex-partner-say.ts");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Reasoning effort (default: high)");
+    expect(codexCalls()).toEqual([]);
+  });
+
+  test("start and say without --write pass only the read-only sandbox config", async () => {
+    const started = await runScript("codex-partner-start.ts", ["review", "Hi"]);
+    const continued = await runScript("codex-partner-say.ts", [
+      "review",
+      "Again",
+    ]);
+
+    expectSuccess(started);
+    expectSuccess(continued);
+
+    for (const call of [codexCall(0), codexCall(1)]) {
+      const configFlag = call.args.indexOf('sandbox_mode="read-only"') - 1;
+
+      expect(call.args.slice(configFlag, configFlag + 2)).toEqual([
+        "--config",
+        'sandbox_mode="read-only"',
+      ]);
+      expect(call.args).not.toContain("--sandbox");
+      expect(call.args).not.toContain("--add-dir");
+    }
+  });
+
   test("start saves the partner and say resumes the same Codex thread", async () => {
     const started = await runScript(
       "codex-partner-start.ts",
@@ -544,6 +595,41 @@ describe("partners", () => {
 
     expect(startCall.cwd).toBe(sayCall.cwd);
     expect(sayCall.cwd).toMatch(/project\/src$/);
+  });
+
+  test("say --write adds the repository root when the saved directory is a subdirectory", async () => {
+    const startDirectory = join(sandbox.project, "src");
+    const started = await runScript(
+      "codex-partner-start.ts",
+      ["review", "Hi"],
+      {
+        cwd: startDirectory,
+        env: { FAKE_CODEX_THREAD_ID: "thread-42" },
+      },
+    );
+    const continued = await runScript("codex-partner-say.ts", [
+      "review",
+      "--write",
+      "Fix it.",
+    ]);
+    const call = codexCall(1);
+    const sandboxFlag = call.args.indexOf("--sandbox");
+
+    expectSuccess(started);
+    expectSuccess(continued);
+    expect(call.cwd).toBe(realpathSync(startDirectory));
+    expect(call.args.slice(-3)).toEqual(["resume", "thread-42", "-"]);
+    expect(call.args.slice(sandboxFlag, sandboxFlag + 8)).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "--add-dir",
+      realpathSync(sandbox.project),
+      "--config",
+      'approval_policy="never"',
+      "--config",
+      "sandbox_workspace_write.network_access=false",
+    ]);
+    expect(call.args).not.toContain('sandbox_mode="read-only"');
   });
 
   test("list shows the repository's partners, most recently used first", async () => {
@@ -753,6 +839,16 @@ describe("partners", () => {
 });
 
 describe("codex-partner-review", () => {
+  test("--help prints the default model and high effort", async () => {
+    const result = await runScript("codex-partner-review.ts", ["--help"]);
+
+    expectSuccess(result);
+    expect(result.stdout).toStartWith("Usage: codex-partner-review.ts");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Reasoning effort (default: high)");
+    expect(codexCalls()).toEqual([]);
+  });
+
   test("reviews the uncommitted changes in a read-only, ephemeral session on gpt-6.1-sol at high effort", async () => {
     editFile();
 
@@ -909,6 +1005,48 @@ describe("codex-partner-review", () => {
     expect(reviewCall.args).toContain('model_reasoning_effort="xhigh"');
     expectSuccess(continued);
     expect(sayCall.args.slice(-3)).toEqual(["resume", "thread-7", "-"]);
+  });
+
+  test("--as reviews read-only before say --write resumes with the workspace-write sandbox", async () => {
+    editFile();
+
+    const reviewed = await runScript(
+      "codex-partner-review.ts",
+      ["--as", "cart"],
+      { env: { FAKE_CODEX_THREAD_ID: "thread-7" } },
+    );
+    const continued = await runScript("codex-partner-say.ts", [
+      "cart",
+      "--write",
+      "Fix P1.",
+    ]);
+    const reviewCall = codexCall(0);
+    const sayCall = codexCall(1);
+    const configFlag = reviewCall.args.indexOf('sandbox_mode="read-only"') - 1;
+    const sandboxFlag = sayCall.args.indexOf("--sandbox");
+
+    expectSuccess(reviewed);
+    expect(reviewCall.args.slice(-2)).toEqual(["review", "--uncommitted"]);
+    expect(reviewCall.args).not.toContain("--ephemeral");
+    expect(reviewCall.args.slice(configFlag, configFlag + 2)).toEqual([
+      "--config",
+      'sandbox_mode="read-only"',
+    ]);
+    expect(reviewCall.args).not.toContain("--sandbox");
+    expect(reviewCall.args).not.toContain("--add-dir");
+    expectSuccess(continued);
+    expect(sayCall.args.slice(-3)).toEqual(["resume", "thread-7", "-"]);
+    expect(sayCall.args.slice(sandboxFlag, sandboxFlag + 8)).toEqual([
+      "--sandbox",
+      "workspace-write",
+      "--add-dir",
+      realpathSync(sandbox.project),
+      "--config",
+      'approval_policy="never"',
+      "--config",
+      "sandbox_workspace_write.network_access=false",
+    ]);
+    expect(sayCall.args).not.toContain('sandbox_mode="read-only"');
   });
 
   test("prints the target line, then the findings, with or without --as", async () => {
