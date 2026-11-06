@@ -50,24 +50,9 @@ The partner list lives in `$XDG_STATE_HOME/codex-partner`, or `~/.local/state/co
 | `CODEX_TOKEN_URL` | The token worker's `/auth.json` URL. Set only in cloud environments. |
 | `CODEX_TOKEN_BEARER` | The worker's serve token. A cloud environment sets it through a network secret, so the session holds only a placeholder. Without it the worker answers 401. |
 
-### Running the scripts without a permission prompt
+### Permission prompts
 
-Claude Code asks before each script runs. To let it run them without asking, add these rules to `.claude/settings.json` in the project, or to your user settings in `~/.claude/settings.json`:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "Bash(*/skills/codex-partner/scripts/codex-partner-ask.ts *)",
-      "Bash(*/skills/codex-partner/scripts/codex-partner-start.ts *)",
-      "Bash(*/skills/codex-partner/scripts/codex-partner-say.ts *)",
-      "Bash(*/skills/codex-partner/scripts/codex-partner-review.ts *)"
-    ]
-  }
-}
-```
-
-Each rule names one script, and every one of them runs Codex in a sandbox, read-only or workspace-write, so no rule covers anything that runs without one.
+The skill's `allowed-tools` line lets Claude run its scripts without a prompt, in every permission mode. Every script runs Codex in a sandbox, read-only or workspace-write, so that rule covers nothing that runs without one. No `settings.json` rule is needed, and a rule with a leading wildcard would be dropped in auto mode.
 
 ## Cloud sessions
 
