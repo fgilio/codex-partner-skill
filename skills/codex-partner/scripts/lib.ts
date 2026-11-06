@@ -44,9 +44,26 @@ export interface Partner {
 export interface TurnOptions {
   model: string | undefined;
   effort: string | undefined;
-  canWrite: boolean;
+  sandbox: SandboxMode;
   keepsMcpServers: boolean;
 }
+
+/** How far Codex may reach beyond reading the workspace. */
+type SandboxMode = "read-only" | "danger-full-access";
+
+/** The model and reasoning effort a command falls back to. */
+export interface TurnDefaults {
+  model?: string;
+  effort?: string;
+}
+
+/** The model and reasoning effort each command uses unless the call passes --model or --effort. An unset value leaves the choice to the Codex config. */
+export const turnDefaults: Record<"ask" | "partner" | "review", TurnDefaults> =
+  {
+    ask: { effort: "low" },
+    partner: {},
+    review: {},
+  };
 
 export interface CodexResult {
   threadId: string | undefined;
@@ -215,18 +232,23 @@ function splitFlag(flag: string): [string, string | undefined] {
     : [flag.slice(0, boundary), flag.slice(boundary + 1)];
 }
 
+/** A default as the usage text shows it. */
+export function describeDefault(value: string | undefined): string {
+  return value ?? "the Codex config";
+}
+
 export function parseTurnArguments(
   argv: string[],
   usage: string,
   {
-    defaultEffort,
+    defaults,
     valueFlags = [],
     allowsWrite = true,
   }: {
-    defaultEffort?: string;
+    defaults: TurnDefaults;
     valueFlags?: string[];
     allowsWrite?: boolean;
-  } = {},
+  },
 ): ParsedArguments & { options: TurnOptions; asJson: boolean } {
   const parsed = parseArguments(argv, {
     usage,
@@ -237,9 +259,11 @@ export function parseTurnArguments(
   return {
     ...parsed,
     options: {
-      model: parsed.values["model"],
-      effort: parsed.values["effort"] ?? defaultEffort,
-      canWrite: parsed.switches.has("write"),
+      model: parsed.values["model"] ?? defaults.model,
+      effort: parsed.values["effort"] ?? defaults.effort,
+      sandbox: parsed.switches.has("write")
+        ? "danger-full-access"
+        : "read-only",
       keepsMcpServers: parsed.switches.has("mcp"),
     },
     asJson: parsed.switches.has("json"),
@@ -514,9 +538,16 @@ export function runCodexReview({
     stdin: instructions,
     threadId: undefined,
     isEphemeral,
-    options: { ...options, canWrite: false },
+    options: { ...options, sandbox: "read-only" },
     directory,
   });
+}
+
+/** The Codex CLI arguments that apply a sandbox mode. */
+function sandboxArguments(mode: SandboxMode): string[] {
+  return mode === "danger-full-access"
+    ? ["--dangerously-bypass-approvals-and-sandbox"]
+    : ["--config", 'sandbox_mode="read-only"'];
 }
 
 async function runCodexExec({
@@ -544,9 +575,7 @@ async function runCodexExec({
     "--json",
     "--output-last-message",
     replyPath,
-    ...(options.canWrite
-      ? ["--dangerously-bypass-approvals-and-sandbox"]
-      : ["--config", 'sandbox_mode="read-only"']),
+    ...sandboxArguments(options.sandbox),
     ...(options.model ? ["--model", options.model] : []),
     ...(options.effort
       ? ["--config", `model_reasoning_effort="${options.effort}"`]

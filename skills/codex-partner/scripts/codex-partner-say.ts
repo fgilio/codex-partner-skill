@@ -4,6 +4,7 @@
 import {
   PartnerError,
   assertPartnerName,
+  describeDefault,
   findPartner,
   holdPartnerLock,
   isPartner,
@@ -15,7 +16,10 @@ import {
   repositoryRoot,
   runCodexTurn,
   updatePartners,
+  turnDefaults,
 } from "./lib";
+
+const defaults = turnDefaults.partner;
 
 const USAGE = `Usage: codex-partner-say.ts <name> [options] <prompt | ->
 
@@ -23,8 +27,8 @@ Continues the partner session started with codex-partner-start.ts <name>.
 Codex sees the whole conversation so far.
 
 Options:
-  --model <id>       Codex model (default: the Codex config)
-  --effort <level>   Reasoning effort (default: the Codex config)
+  --model <id>       Codex model (default: ${describeDefault(defaults.model)})
+  --effort <level>   Reasoning effort (default: ${describeDefault(defaults.effort)})
   --write            Let Codex edit files and run any command, with no sandbox
   --mcp              Keep the MCP servers from the Codex config switched on
   --json             Print JSON with the name, thread id, and reply
@@ -36,6 +40,7 @@ await main(async () => {
   const { positionals, options, asJson } = parseTurnArguments(
     process.argv.slice(2),
     USAGE,
+    { defaults },
   );
   const [name, promptArgument, ...extra] = positionals;
 
