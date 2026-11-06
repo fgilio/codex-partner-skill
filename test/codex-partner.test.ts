@@ -34,6 +34,7 @@ interface Sandbox {
   codexHome: string;
   log: string;
   stateHome: string;
+  worktrees: string;
   env: Record<string, string>;
 }
 
@@ -60,6 +61,7 @@ function createSandbox(): Sandbox {
   const codexHome = join(root, "codex-home");
   const log = join(root, "codex-calls.jsonl");
   const stateHome = join(root, "state");
+  const worktrees = join(root, "worktrees");
 
   mkdirSync(binDirectory);
   mkdirSync(join(project, "src"), { recursive: true });
@@ -72,12 +74,14 @@ function createSandbox(): Sandbox {
     codexHome,
     log,
     stateHome,
+    worktrees,
     env: {
       PATH: `${binDirectory}:${process.env.PATH ?? ""}`,
       HOME: root,
       CODEX_HOME: codexHome,
       XDG_STATE_HOME: stateHome,
       FAKE_CODEX_LOG: log,
+      FAKE_CODEX_WORKTREES: worktrees,
     },
   };
 }
@@ -282,6 +286,39 @@ describe("the fake codex", () => {
       "fake codex: --output-last-message is missing",
     );
     expect(existsSync(join(sandbox.root, "exec"))).toBe(false);
+  });
+
+  test("--worktree runs in a new detached worktree of the repository", () => {
+    commitFile("cart.js");
+
+    const run = Bun.spawnSync(
+      [
+        process.execPath,
+        join(import.meta.dir, "fixtures", "fake-codex.ts"),
+        "exec",
+        "--output-last-message",
+        join(sandbox.root, "reply.md"),
+        "--worktree",
+        "-",
+      ],
+      {
+        cwd: sandbox.project,
+        env: sandbox.env,
+        stdin: new TextEncoder().encode("Hi"),
+      },
+    );
+    const { cwd } = codexCall(0);
+    const worktrees = Bun.spawnSync(
+      ["git", "worktree", "list", "--porcelain"],
+      {
+        cwd: sandbox.project,
+      },
+    ).stdout.toString();
+
+    expect(run.exitCode).toBe(0);
+    expect(dirname(dirname(cwd))).toBe(realpathSync(sandbox.worktrees));
+    expect(worktrees).toContain(`worktree ${cwd}\n`);
+    expect(existsSync(join(cwd, "cart.js"))).toBe(true);
   });
 });
 
