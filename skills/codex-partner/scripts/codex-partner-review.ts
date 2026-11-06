@@ -8,7 +8,6 @@ import {
   PartnerError,
   assertNewPartner,
   assertPartnerName,
-  describeDefault,
   errorCode,
   main,
   parseTurnArguments,
@@ -32,8 +31,8 @@ Options:
   --base <branch>    Review the changes against this branch
   --commit <sha>     Review the changes of one commit
   --as <name>        Keep the review as a partner, to continue with codex-partner-say.ts <name>
-  --model <id>       Codex model (default: ${describeDefault(defaults.model)})
-  --effort <level>   Reasoning effort (default: ${describeDefault(defaults.effort)})
+  --model <id>       Codex model (default: ${defaults.model})
+  --effort <level>   Reasoning effort (default: ${defaults.effort})
   --mcp              Keep the MCP servers from the Codex config switched on
   --json             Print JSON with the target and reply, plus the name and thread id with --as
 

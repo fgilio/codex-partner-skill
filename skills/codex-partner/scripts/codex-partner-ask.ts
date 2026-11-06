@@ -3,7 +3,6 @@
 
 import {
   PartnerError,
-  describeDefault,
   main,
   parseTurnArguments,
   printResult,
@@ -19,9 +18,9 @@ const USAGE = `Usage: codex-partner-ask.ts [options] <prompt | ->
 Asks Codex one question. Codex keeps no session, so a follow-up needs a partner.
 
 Options:
-  --model <id>       Codex model (default: ${describeDefault(defaults.model)})
-  --effort <level>   Reasoning effort (default: ${describeDefault(defaults.effort)})
-  --write            Let Codex edit files and run any command, with no sandbox
+  --model <id>       Codex model (default: ${defaults.model})
+  --effort <level>   Reasoning effort (default: ${defaults.effort})
+  --write            Let Codex edit files inside the repository, in its workspace-write sandbox with network off
   --mcp              Keep the MCP servers from the Codex config switched on
   --json             Print JSON with the reply
 

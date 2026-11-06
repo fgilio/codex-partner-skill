@@ -4,7 +4,6 @@
 import {
   PartnerError,
   assertPartnerName,
-  describeDefault,
   findPartner,
   holdPartnerLock,
   isPartner,
@@ -27,9 +26,9 @@ Continues the partner session started with codex-partner-start.ts <name>.
 Codex sees the whole conversation so far.
 
 Options:
-  --model <id>       Codex model (default: ${describeDefault(defaults.model)})
-  --effort <level>   Reasoning effort (default: ${describeDefault(defaults.effort)})
-  --write            Let Codex edit files and run any command, with no sandbox
+  --model <id>       Codex model (default: ${defaults.model})
+  --effort <level>   Reasoning effort (default: ${defaults.effort})
+  --write            Let Codex edit files inside the repository, in its workspace-write sandbox with network off
   --mcp              Keep the MCP servers from the Codex config switched on
   --json             Print JSON with the name, thread id, and reply
 
