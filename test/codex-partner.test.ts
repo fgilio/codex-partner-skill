@@ -63,6 +63,9 @@ function createSandbox(): Sandbox {
 
   mkdirSync(binDirectory);
   mkdirSync(join(project, "src"), { recursive: true });
+  // A linked state home on every platform, as macOS links /var to /private/var.
+  mkdirSync(join(root, "linked-state"));
+  symlinkSync(join(root, "linked-state"), stateHome);
   installFake(binDirectory, "codex", "fake-codex.ts");
   Bun.spawnSync(["git", "init", "-q"], { cwd: project });
 
