@@ -3,6 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { mkdirSync, realpathSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import {
@@ -91,13 +92,16 @@ await main(async () => {
  */
 function worktreePath(repository: string, name: string): string {
   const hash = createHash("sha256").update(repository).digest("hex");
-
-  return join(
+  const checkoutWorktrees = join(
     partnerHome(),
     "worktrees",
     `${basename(repository)}-${hash.slice(0, 8)}`,
-    name,
   );
+
+  mkdirSync(checkoutWorktrees, { recursive: true, mode: 0o700 });
+
+  // Git and Codex report the resolved path (/private/var on macOS), so the saved directory matches theirs.
+  return join(realpathSync(checkoutWorktrees), name);
 }
 
 function addWorktree(repository: string, path: string): string {
