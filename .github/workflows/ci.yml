@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   checks:
-    uses: fgilio/claude-plugins/.github/workflows/fleet-ci.yml@c212d45267f7fb5997e99d0326fbc988edc27aaa # fleet-ci 2026-11-18
+    uses: fgilio/claude-plugins/.github/workflows/fleet-ci.yml@4f462abf9701b14207f07dda052d3ac4acb2fe22 # fleet-ci 2026-11-18
     with:
       profile: code
   ci-success:
