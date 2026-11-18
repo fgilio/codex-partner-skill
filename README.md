@@ -37,9 +37,9 @@ Each command runs the model and reasoning effort below unless a call passes `--m
 
 | Command                                          | Model         | Effort   |
 | ------------------------------------------------ | ------------- | -------- |
-| `codex-partner-ask.ts`                           | `gpt-6.1-sol` | `medium` |
-| `codex-partner-start.ts`, `codex-partner-say.ts` | `gpt-6.1-sol` | `high`   |
-| `codex-partner-review.ts`                        | `gpt-6.1-sol` | `high`   |
+| `codex-partner-ask.ts`                           | `gpt-6.2-sol` | `medium` |
+| `codex-partner-start.ts`, `codex-partner-say.ts` | `gpt-6.2-sol` | `high`   |
+| `codex-partner-review.ts`                        | `gpt-6.2-sol` | `high`   |
 
 MCP servers from the Codex config stay off for every call unless it passes `--mcp`, so an OAuth server can't open a browser in the middle of a turn.
 

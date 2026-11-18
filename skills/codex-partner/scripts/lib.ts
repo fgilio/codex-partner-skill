@@ -57,7 +57,7 @@ export interface TurnDefaults {
   effort: string;
 }
 
-const DEFAULT_MODEL = "gpt-6.1-sol";
+const DEFAULT_MODEL = "gpt-6.2-sol";
 
 /** The model and reasoning effort each command uses unless the call passes --model or --effort. */
 export const turnDefaults: Record<"ask" | "partner" | "review", TurnDefaults> =

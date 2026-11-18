@@ -78,7 +78,7 @@ Options for ask, start, and say:
 | Option | Effect |
 | --- | --- |
 | `--effort <level>` | Reasoning effort: `low`, `medium`, `high`, or `xhigh`. Defaults to `medium` for ask and `high` for start and say. |
-| `--model <id>` | Codex model. Defaults to `gpt-6.1-sol`. |
+| `--model <id>` | Codex model. Defaults to `gpt-6.2-sol`. |
 | `--write` | Codex may edit files inside the repository and run commands, in its workspace-write sandbox with network off. |
 | `--mcp` | Keeps the MCP servers of the Codex config switched on. They are off by default. |
 

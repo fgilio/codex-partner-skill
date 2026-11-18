@@ -309,7 +309,7 @@ describe("the fake codex", () => {
 });
 
 describe("codex-partner-ask", () => {
-  test("sends the prompt on stdin to a read-only, ephemeral session on gpt-6.1-sol at medium effort", async () => {
+  test("sends the prompt on stdin to a read-only, ephemeral session on gpt-6.2-sol at medium effort", async () => {
     const result = await runScript("codex-partner-ask.ts", [
       "Does the loop stop?",
     ]);
@@ -321,10 +321,10 @@ describe("codex-partner-ask", () => {
     expect(call.args.slice(-2)).toEqual(["--ephemeral", "-"]);
     expect(call.args).toContain('sandbox_mode="read-only"');
     expect(call.args).not.toContain("--sandbox");
-    expect(modelAndEffort(call)).toEqual(["gpt-6.1-sol", "medium"]);
+    expect(modelAndEffort(call)).toEqual(["gpt-6.2-sol", "medium"]);
   });
 
-  test("--model and --effort override the defaults, and partners run gpt-6.1-sol at high effort", async () => {
+  test("--model and --effort override the defaults, and partners run gpt-6.2-sol at high effort", async () => {
     await runScript("codex-partner-ask.ts", [
       "--model",
       "model-a",
@@ -343,8 +343,8 @@ describe("codex-partner-ask", () => {
     ]);
 
     expect(modelAndEffort(codexCall(0))).toEqual(["model-a", "low"]);
-    expect(modelAndEffort(codexCall(1))).toEqual(["gpt-6.1-sol", "high"]);
-    expect(modelAndEffort(codexCall(2))).toEqual(["gpt-6.1-sol", "high"]);
+    expect(modelAndEffort(codexCall(1))).toEqual(["gpt-6.2-sol", "high"]);
+    expect(modelAndEffort(codexCall(2))).toEqual(["gpt-6.2-sol", "high"]);
     expect(modelAndEffort(codexCall(3))).toEqual(["model-b", "minimal"]);
   });
 
@@ -482,7 +482,7 @@ describe("codex-partner-ask", () => {
     const result = await runScript("codex-partner-ask.ts", ["--help"]);
 
     expectSuccess(result);
-    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.2-sol)");
     expect(result.stdout).toContain("Reasoning effort (default: medium)");
     expect(codexCalls()).toEqual([]);
   });
@@ -530,7 +530,7 @@ describe("partners", () => {
 
     expectSuccess(result);
     expect(result.stdout).toStartWith("Usage: codex-partner-start.ts");
-    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.2-sol)");
     expect(result.stdout).toContain("Reasoning effort (default: high)");
     expect(codexCalls()).toEqual([]);
   });
@@ -540,7 +540,7 @@ describe("partners", () => {
 
     expectSuccess(result);
     expect(result.stdout).toStartWith("Usage: codex-partner-say.ts");
-    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.2-sol)");
     expect(result.stdout).toContain("Reasoning effort (default: high)");
     expect(codexCalls()).toEqual([]);
   });
@@ -1014,12 +1014,12 @@ describe("codex-partner-review", () => {
 
     expectSuccess(result);
     expect(result.stdout).toStartWith("Usage: codex-partner-review.ts");
-    expect(result.stdout).toContain("Codex model (default: gpt-6.1-sol)");
+    expect(result.stdout).toContain("Codex model (default: gpt-6.2-sol)");
     expect(result.stdout).toContain("Reasoning effort (default: high)");
     expect(codexCalls()).toEqual([]);
   });
 
-  test("reviews the uncommitted changes in a read-only, ephemeral session on gpt-6.1-sol at high effort", async () => {
+  test("reviews the uncommitted changes in a read-only, ephemeral session on gpt-6.2-sol at high effort", async () => {
     editFile();
 
     const result = await runScript("codex-partner-review.ts", []);
@@ -1033,7 +1033,7 @@ describe("codex-partner-review", () => {
       "--uncommitted",
     ]);
     expect(call.args).toContain('sandbox_mode="read-only"');
-    expect(modelAndEffort(call)).toEqual(["gpt-6.1-sol", "high"]);
+    expect(modelAndEffort(call)).toEqual(["gpt-6.2-sol", "high"]);
   });
 
   test("reviews the branch against origin/HEAD when the working tree is clean", async () => {
