@@ -7,6 +7,7 @@ import {
   parseTurnArguments,
   printResult,
   readPrompt,
+  resolveRunContext,
   runCodexTurn,
   turnDefaults,
 } from "./lib";
@@ -44,7 +45,7 @@ await main(async () => {
     prompt: readPrompt(positionals[0], USAGE),
     isEphemeral: true,
     options,
-    directory: process.cwd(),
+    context: resolveRunContext(process.cwd()),
   });
 
   printResult({ reply: turn.reply }, { asJson });

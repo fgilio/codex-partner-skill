@@ -13,6 +13,7 @@ import {
   printResult,
   readPrompt,
   repositoryRoot,
+  resolveRunContext,
   runCodexTurn,
   updatePartners,
   turnDefaults,
@@ -68,7 +69,7 @@ await main(async () => {
     prompt,
     threadId: partner.thread_id,
     options,
-    directory: partner.directory,
+    context: resolveRunContext(partner.directory),
   });
 
   updatePartners((partners) =>

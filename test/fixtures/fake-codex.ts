@@ -18,8 +18,22 @@ const replyPath = replyFlag === -1 ? undefined : args[replyFlag + 1];
 if (process.env.FAKE_CODEX_LOG) {
   appendFileSync(
     process.env.FAKE_CODEX_LOG,
-    `${JSON.stringify({ args, stdin, cwd: process.cwd() })}\n`,
+    `${JSON.stringify({ args, stdin, cwd: process.cwd(), env: chosenEnv() })}\n`,
   );
+}
+
+/**
+ * The environment fields a test may check. Only names Codex reads to
+ * find its home and login go here, and never a secret's value: the log
+ * says whether a secret was set, not what it held.
+ */
+function chosenEnv(): Record<string, string | boolean | null> {
+  return {
+    CODEX_HOME: process.env.CODEX_HOME ?? null,
+    HOME: process.env.HOME ?? null,
+    CODEX_API_KEY: process.env.CODEX_API_KEY !== undefined,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY !== undefined,
+  };
 }
 
 const emit = (event: Record<string, unknown>) =>
