@@ -7,6 +7,7 @@ import {
   main,
   parseArguments,
   printJson,
+  resolveRunContext,
 } from "./lib";
 
 const USAGE = `Usage: codex-partner-auth.ts [--quiet]
@@ -33,13 +34,13 @@ await main(async () => {
   }
 
   if (!switches.has("quiet")) {
-    printJson(ensureCodexLogin());
+    printJson(ensureCodexLogin(resolveRunContext(process.cwd())));
 
     return;
   }
 
   try {
-    ensureCodexLogin();
+    ensureCodexLogin(resolveRunContext(process.cwd()));
   } catch (error) {
     process.stderr.write(
       `codex-partner: ${error instanceof Error ? error.message : String(error)}\n`,

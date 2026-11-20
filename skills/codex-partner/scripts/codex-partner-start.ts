@@ -17,6 +17,7 @@ import {
   printResult,
   readPrompt,
   repositoryRoot,
+  resolveRunContext,
   runCodexTurn,
   savePartner,
   turnDefaults,
@@ -69,7 +70,11 @@ await main(async () => {
   let turn: CodexResult;
 
   try {
-    turn = await runCodexTurn({ prompt, options, directory });
+    turn = await runCodexTurn({
+      prompt,
+      options,
+      context: resolveRunContext(directory),
+    });
   } catch (error) {
     if (inWorktree) {
       removeWorktree(repository, directory);

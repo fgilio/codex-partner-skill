@@ -2,7 +2,9 @@
  * Shared runtime for the codex-partner scripts.
  *
  * Every Codex call goes through runCodexExec(), so stdin, sandbox,
- * MCP, and login handling stay in one place.
+ * MCP, and login handling stay in one place. Each run resolves one
+ * RunContext up front, and the login, the MCP overrides and the child
+ * process all read from it.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -66,6 +68,40 @@ export const turnDefaults: Record<"ask" | "partner" | "review", TurnDefaults> =
     partner: { model: DEFAULT_MODEL, effort: "high" },
     review: { model: DEFAULT_MODEL, effort: "high" },
   };
+
+/**
+ * Where one Codex run happens: its home, its working directory, and
+ * the environment it sees.
+ *
+ * Resolved once per run, so the login check, the MCP overrides and
+ * the Codex child cannot disagree about which home or variables apply.
+ */
+export interface RunContext {
+  /** The Codex home: its config.toml, auth.json and sessions. */
+  codexHome: string;
+  /** The directory Codex runs in. */
+  directory: string;
+  /** The variables the login fetch and the Codex child see. */
+  env: NodeJS.ProcessEnv;
+}
+
+/**
+ * The context for a run in `directory`, from the caller's environment.
+ *
+ * The environment is a copy, so a later change to it touches this run
+ * only. CODEX_HOME passes through as is: an empty or unset value means
+ * Codex falls back to ~/.codex itself.
+ */
+export function resolveRunContext(
+  directory: string,
+  env: NodeJS.ProcessEnv = process.env,
+): RunContext {
+  return {
+    codexHome: codexHome(env),
+    directory,
+    env: { ...env },
+  };
+}
 
 export interface CodexResult {
   threadId: string | undefined;
@@ -319,8 +355,9 @@ export function partnerHome(): string {
   );
 }
 
-export function codexHome(): string {
-  return process.env.CODEX_HOME || join(homedir(), ".codex");
+/** The Codex home that `env` names, or ~/.codex when it names none. */
+export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
+  return env.CODEX_HOME || join(homedir(), ".codex");
 }
 
 function partnersPath(): string {
@@ -498,13 +535,13 @@ export function runCodexTurn({
   threadId,
   isEphemeral = false,
   options,
-  directory,
+  context,
 }: {
   prompt: string;
   threadId?: string;
   isEphemeral?: boolean;
   options: TurnOptions;
-  directory: string;
+  context: RunContext;
 }): Promise<CodexResult> {
   return runCodexExec({
     // "-" reads the prompt from stdin, clear of argv length limits.
@@ -513,7 +550,7 @@ export function runCodexTurn({
     threadId,
     isEphemeral,
     options,
-    directory,
+    context,
   });
 }
 
@@ -528,13 +565,13 @@ export function runCodexReview({
   instructions = "",
   isEphemeral,
   options,
-  directory,
+  context,
 }: {
   target: string[];
   instructions?: string | undefined;
   isEphemeral: boolean;
   options: TurnOptions;
-  directory: string;
+  context: RunContext;
 }): Promise<CodexResult> {
   return runCodexExec({
     command: ["review", ...target],
@@ -542,7 +579,7 @@ export function runCodexReview({
     threadId: undefined,
     isEphemeral,
     options: { ...options, sandbox: "read-only" },
-    directory,
+    context,
   });
 }
 
@@ -576,16 +613,16 @@ async function runCodexExec({
   threadId,
   isEphemeral,
   options,
-  directory,
+  context,
 }: {
   command: string[];
   stdin: string;
   threadId: string | undefined;
   isEphemeral: boolean;
   options: TurnOptions;
-  directory: string;
+  context: RunContext;
 }): Promise<CodexResult> {
-  ensureCodexLogin();
+  ensureCodexLogin(context);
 
   const scratch = mkdtempSync(join(tmpdir(), "codex-partner-"));
   const replyPath = join(scratch, "reply.md");
@@ -595,18 +632,18 @@ async function runCodexExec({
     "--json",
     "--output-last-message",
     replyPath,
-    ...sandboxArguments(options.sandbox, directory),
+    ...sandboxArguments(options.sandbox, context.directory),
     ...(options.model ? ["--model", options.model] : []),
     ...(options.effort
       ? ["--config", `model_reasoning_effort="${options.effort}"`]
       : []),
-    ...(options.keepsMcpServers ? [] : mcpServerOverrides()),
+    ...(options.keepsMcpServers ? [] : mcpServerOverrides(context.codexHome)),
     ...(isEphemeral ? ["--ephemeral"] : []),
     ...command,
   ];
 
   try {
-    const run = await spawnCodex(codexArguments, stdin, directory);
+    const run = await spawnCodex(codexArguments, stdin, context);
     const reply = existsSync(replyPath)
       ? readFileSync(replyPath, "utf8").trim()
       : "";
@@ -625,10 +662,10 @@ async function runCodexExec({
 function spawnCodex(
   codexArguments: string[],
   stdin: string,
-  directory: string,
+  { directory, env }: RunContext,
 ): Promise<CodexRun> {
   return new Promise((resolve, reject) => {
-    const child = spawn("codex", codexArguments, { cwd: directory });
+    const child = spawn("codex", codexArguments, { cwd: directory, env });
     const stderrLines: string[] = [];
     const errorMessages: string[] = [];
     let startedThreadId: string | undefined;
@@ -732,14 +769,14 @@ function describeCodexFailure(
 }
 
 /**
- * Turns off every MCP server named in the Codex config.
+ * Turns off every MCP server named in the config of the Codex home.
  *
  * Only bare TOML keys can be addressed: the --config parser splits
  * on every dot, so a quoted name such as "a.b" stays enabled. An
  * `mcp_servers={}` override merges into the table and changes nothing.
  */
-function mcpServerOverrides(): string[] {
-  const configPath = join(codexHome(), "config.toml");
+function mcpServerOverrides(home: string): string[] {
+  const configPath = join(home, "config.toml");
 
   if (!existsSync(configPath)) {
     return [];
@@ -760,19 +797,21 @@ function mcpServerOverrides(): string[] {
 }
 
 /**
- * Keeps a worker-issued Codex login current when CODEX_TOKEN_URL is set.
+ * Keeps a worker-issued Codex login current in the run's Codex home
+ * when the run's CODEX_TOKEN_URL is set.
  *
  * A login with a refresh token belongs to `codex login` and is
  * never replaced.
  */
-export function ensureCodexLogin(): LoginReport {
-  const tokenUrl = process.env.CODEX_TOKEN_URL;
+export function ensureCodexLogin(context: RunContext): LoginReport {
+  const { env } = context;
+  const tokenUrl = env.CODEX_TOKEN_URL;
 
   if (!tokenUrl) {
     return { source: "codex-login" };
   }
 
-  const loginPath = join(codexHome(), "auth.json");
+  const loginPath = join(context.codexHome, "auth.json");
   const currentLogin = readJsonIfPresent(
     loginPath,
     "Run `codex login`, or delete the file to use the token worker.",
@@ -794,7 +833,7 @@ export function ensureCodexLogin(): LoginReport {
     };
   }
 
-  const { login, expiresAt } = fetchWorkerLogin(tokenUrl);
+  const { login, expiresAt } = fetchWorkerLogin(tokenUrl, env);
 
   writeJsonAtomically(loginPath, login, 0o600);
 
@@ -818,15 +857,18 @@ function isWorkerIssued(login: unknown): login is WorkerLogin {
 /**
  * Fetches with curl, which honors the cloud VM's HTTPS proxy and CA store.
  */
-function fetchWorkerLogin(tokenUrl: string): {
+function fetchWorkerLogin(
+  tokenUrl: string,
+  env: NodeJS.ProcessEnv,
+): {
   login: WorkerLogin;
   expiresAt: number;
 } {
   const host = hostOf(tokenUrl);
   const headers = ["Accept: application/json"];
 
-  if (process.env.CODEX_TOKEN_BEARER) {
-    headers.push(`Authorization: Bearer ${process.env.CODEX_TOKEN_BEARER}`);
+  if (env.CODEX_TOKEN_BEARER) {
+    headers.push(`Authorization: Bearer ${env.CODEX_TOKEN_BEARER}`);
   }
 
   const result = spawnSync(
@@ -843,7 +885,7 @@ function fetchWorkerLogin(tokenUrl: string): {
       "\n%{http_code}",
       tokenUrl,
     ],
-    { input: headers.join("\n"), encoding: "utf8" },
+    { input: headers.join("\n"), encoding: "utf8", env },
   );
 
   if (errorCode(result.error) === "ENOENT") {
@@ -864,7 +906,7 @@ function fetchWorkerLogin(tokenUrl: string): {
 
   if (status === 401) {
     throw new PartnerError(
-      process.env.CODEX_TOKEN_BEARER
+      env.CODEX_TOKEN_BEARER
         ? `The token worker at ${host} rejected the serve token in CODEX_TOKEN_BEARER (401). In a cloud environment the session holds only a placeholder, so check that the network secret for ${host} holds the worker's SERVE_TOKEN; elsewhere, check the variable itself. Then start a new session.`
         : `The token worker at ${host} rejected the request (401): CODEX_TOKEN_BEARER is unset, so it carried no serve token. In a cloud environment, add a network secret for ${host} exposed as CODEX_TOKEN_BEARER, then start a new session.`,
     );

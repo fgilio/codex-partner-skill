@@ -14,6 +14,7 @@ import {
   printResult,
   readPrompt,
   repositoryRoot,
+  resolveRunContext,
   runCodexReview,
   savePartner,
   turnDefaults,
@@ -92,7 +93,7 @@ await main(async () => {
     instructions,
     isEphemeral: name === undefined,
     options,
-    directory,
+    context: resolveRunContext(directory),
   });
 
   if (name !== undefined) {

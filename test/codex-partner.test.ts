@@ -49,6 +49,8 @@ interface CodexCall {
   args: string[];
   stdin: string;
   cwd: string;
+  /** The environment fields the fake codex reports, never secret values. */
+  env: Record<string, unknown>;
 }
 
 let sandbox: Sandbox;
@@ -149,7 +151,8 @@ function isCodexCall(value: unknown): value is CodexCall {
     Array.isArray(value.args) &&
     value.args.every((argument) => typeof argument === "string") &&
     typeof value.stdin === "string" &&
-    typeof value.cwd === "string"
+    typeof value.cwd === "string" &&
+    isRecord(value.env)
   );
 }
 
@@ -1308,6 +1311,8 @@ describe("cloud auth", () => {
     expect(requests[0]?.authorization).toBe("Bearer serve-secret");
     expect(storedTokens().account_id).toBe("account-1");
     expect(statSync(authPath()).mode & 0o777).toBe(0o600);
+    // The login lands in the same home Codex then runs with.
+    expect(codexCall(0).env["CODEX_HOME"]).toBe(sandbox.codexHome);
   });
 
   test("reuses a stored worker login until it is about to expire", async () => {
@@ -1464,5 +1469,162 @@ describe("cloud auth", () => {
 
     expect(result.status).toBe(1);
     expect(result.error).toMatch(/takes no arguments/);
+  });
+});
+
+/**
+ * A call's arguments with the per-run reply file and the project path
+ * replaced by placeholders, so a whole argument list can be compared.
+ */
+function stableArguments(call: CodexCall): string[] {
+  const replyFlag = call.args.indexOf("--output-last-message");
+  const project = realpathSync(sandbox.project);
+
+  return call.args.map((argument, index) =>
+    index === replyFlag + 1 && replyFlag !== -1
+      ? "<reply>"
+      : argument === project
+        ? "<project>"
+        : argument,
+  );
+}
+
+/** The arguments every Codex call starts with, up to the sandbox flags. */
+const callHead = [
+  "exec",
+  "--skip-git-repo-check",
+  "--json",
+  "--output-last-message",
+  "<reply>",
+];
+const readOnlyArguments = ["--config", 'sandbox_mode="read-only"'];
+const mcpOffArguments = ["--config", "mcp_servers.sentry.enabled=false"];
+const modelArguments = (effort: string) => [
+  "--model",
+  "gpt-6.2-sol",
+  "--config",
+  `model_reasoning_effort="${effort}"`,
+];
+
+/** A Codex config in `home` that names one MCP server, sentry. */
+function writeCodexConfig(home: string): void {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.toml"), '[mcp_servers.sentry]\nurl = "x"\n');
+}
+
+describe("run context", () => {
+  test("ask, start, say and review pass Codex the same arguments as before", async () => {
+    writeCodexConfig(sandbox.codexHome);
+    editFile();
+
+    const env = { FAKE_CODEX_THREAD_ID: "thread-7" };
+
+    // One at a time: say resumes the partner start saves.
+    expectSuccess(await runScript("codex-partner-ask.ts", ["Hi"], { env }));
+    expectSuccess(
+      await runScript("codex-partner-start.ts", ["pair", "--write", "Hi"], {
+        env,
+      }),
+    );
+    expectSuccess(await runScript("codex-partner-say.ts", ["pair", "Again"]));
+    expectSuccess(await runScript("codex-partner-review.ts", []));
+    expectSuccess(
+      await runScript("codex-partner-review.ts", ["--as", "reviewer"]),
+    );
+
+    expect(codexCalls().map(stableArguments)).toEqual([
+      [
+        ...callHead,
+        ...readOnlyArguments,
+        ...modelArguments("medium"),
+        ...mcpOffArguments,
+        "--ephemeral",
+        "-",
+      ],
+      [
+        ...callHead,
+        "--sandbox",
+        "workspace-write",
+        "--add-dir",
+        "<project>",
+        "--config",
+        'approval_policy="never"',
+        "--config",
+        "sandbox_workspace_write.network_access=false",
+        ...modelArguments("high"),
+        ...mcpOffArguments,
+        "-",
+      ],
+      [
+        ...callHead,
+        ...readOnlyArguments,
+        ...modelArguments("high"),
+        ...mcpOffArguments,
+        "resume",
+        "thread-7",
+        "-",
+      ],
+      [
+        ...callHead,
+        ...readOnlyArguments,
+        ...modelArguments("high"),
+        ...mcpOffArguments,
+        "--ephemeral",
+        "review",
+        "--uncommitted",
+      ],
+      [
+        ...callHead,
+        ...readOnlyArguments,
+        ...modelArguments("high"),
+        ...mcpOffArguments,
+        "review",
+        "--uncommitted",
+      ],
+    ]);
+  });
+
+  test("a custom CODEX_HOME names the MCP servers and reaches Codex unchanged", async () => {
+    writeCodexConfig(sandbox.codexHome);
+    // A config in the default home must not count while CODEX_HOME points elsewhere.
+    mkdirSync(join(sandbox.root, ".codex"), { recursive: true });
+    writeFileSync(
+      join(sandbox.root, ".codex", "config.toml"),
+      '[mcp_servers.linear]\nurl = "y"\n',
+    );
+
+    expectSuccess(await runScript("codex-partner-ask.ts", ["Hi"]));
+    const call = codexCall(0);
+
+    expect(call.env["CODEX_HOME"]).toBe(sandbox.codexHome);
+    expect(call.args).toContain("mcp_servers.sentry.enabled=false");
+    expect(call.args).not.toContain("mcp_servers.linear.enabled=false");
+  });
+
+  test("an empty CODEX_HOME reads the MCP servers from ~/.codex and reaches Codex as is", async () => {
+    writeCodexConfig(join(sandbox.root, ".codex"));
+
+    expectSuccess(
+      await runScript("codex-partner-ask.ts", ["Hi"], {
+        env: { CODEX_HOME: "" },
+      }),
+    );
+    const call = codexCall(0);
+
+    expect(call.env["CODEX_HOME"]).toBe("");
+    expect(call.args).toContain("mcp_servers.sentry.enabled=false");
+  });
+
+  test("Codex inherits the caller's API-key variables as it did before", async () => {
+    expectSuccess(
+      await runScript("codex-partner-ask.ts", ["Hi"], {
+        env: { CODEX_API_KEY: "sk-test", OPENAI_API_KEY: "sk-test" },
+      }),
+    );
+
+    expect(codexCall(0).env).toMatchObject({
+      CODEX_API_KEY: true,
+      OPENAI_API_KEY: true,
+    });
   });
 });
