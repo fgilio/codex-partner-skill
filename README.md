@@ -1,5 +1,8 @@
 # codex-partner skill
 
+> [!WARNING]
+> Deprecated. This plugin is no longer maintained, and the repository is archived.
+
 Talk with [OpenAI Codex](https://github.com/openai/codex) from Claude Code. Ask it for a one-shot second opinion, have it review your changes, or start a named partner that remembers the conversation across turns, for pair programming, design debates, and iterative reviews. It runs in local sessions and in [Claude Code cloud sessions](https://code.claude.com/docs/en/claude-code-on-the-web).
 
 Everything Claude follows lives in [SKILL.md](skills/codex-partner/SKILL.md).
